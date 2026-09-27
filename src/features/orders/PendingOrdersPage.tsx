@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { OrderStatus } from '../../types/database';
 import PaymentModal from './PaymentModal';
@@ -28,6 +28,7 @@ export default function PendingOrdersPage() {
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [chargeOrder, setChargeOrder] = useState<OrderWithItems | null>(null);
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
+  const isPrintingRef = useRef(false);
 
   useEffect(() => {
     loadPendingOrders(true);
@@ -36,12 +37,17 @@ export default function PendingOrdersPage() {
   }, []);
 
   useEffect(() => {
-    const clearPrintOrder = () => setPrintOrder(null);
+    const clearPrintOrder = () => {
+      setPrintOrder(null);
+      isPrintingRef.current = false;
+    };
     window.addEventListener('afterprint', clearPrintOrder);
     return () => window.removeEventListener('afterprint', clearPrintOrder);
   }, []);
 
   function printTicket(order: OrderWithItems) {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
     setPrintOrder(order);
     window.setTimeout(() => window.print(), 50);
   }

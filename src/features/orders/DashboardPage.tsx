@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { useAuth } from '../auth/AuthContext';
@@ -33,6 +33,7 @@ export default function DashboardPage() {
   const [savingOrderId, setSavingOrderId] = useState<string | null>(null);
   const [chargeOrder, setChargeOrder] = useState<OrderWithItems | null>(null);
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
+  const isPrintingRef = useRef(false);
   const [scheduleCleared, setScheduleCleared] = useState(false);
 
   useEffect(() => {
@@ -48,7 +49,10 @@ export default function DashboardPage() {
   }, [location.state]);
 
   useEffect(() => {
-    const clearPrintOrder = () => setPrintOrder(null);
+    const clearPrintOrder = () => {
+      setPrintOrder(null);
+      isPrintingRef.current = false;
+    };
     window.addEventListener('afterprint', clearPrintOrder);
     return () => window.removeEventListener('afterprint', clearPrintOrder);
   }, []);
@@ -118,6 +122,8 @@ export default function DashboardPage() {
   }
 
   function printTicket(order: OrderWithItems) {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
     setPrintOrder(order);
     window.setTimeout(() => window.print(), 50);
   }

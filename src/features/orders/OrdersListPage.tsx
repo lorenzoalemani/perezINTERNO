@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { supabase } from '../../lib/supabase';
 import type { OrderStatus, PaymentStatus } from '../../types/database';
 import PaymentModal from './PaymentModal';
@@ -57,6 +57,7 @@ export default function OrdersListPage() {
   const [selectedOrder, setSelectedOrder] = useState<OrderWithItems | null>(null);
   const [chargeOrder, setChargeOrder] = useState<OrderWithItems | null>(null);
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
+  const isPrintingRef = useRef(false);
 
   useEffect(() => {
     loadOrders();
@@ -67,12 +68,17 @@ export default function OrdersListPage() {
   }, [statusFilter, paymentFilter, dateFilter]);
 
   useEffect(() => {
-    const clearPrintOrder = () => setPrintOrder(null);
+    const clearPrintOrder = () => {
+      setPrintOrder(null);
+      isPrintingRef.current = false;
+    };
     window.addEventListener('afterprint', clearPrintOrder);
     return () => window.removeEventListener('afterprint', clearPrintOrder);
   }, []);
 
   function printTicket(order: OrderWithItems) {
+    if (isPrintingRef.current) return;
+    isPrintingRef.current = true;
     setPrintOrder(order);
     window.setTimeout(() => window.print(), 50);
   }

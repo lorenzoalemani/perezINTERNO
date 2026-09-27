@@ -658,6 +658,12 @@ textarea:focus {
     background: white;
   }
 
+  /* El ticket se monta directamente en body. Ocultar el dashboard con
+     display evita que su alto agregue hojas vacías al trabajo de impresión. */
+  body > #root {
+    display: none !important;
+  }
+
   body * {
     visibility: hidden;
   }

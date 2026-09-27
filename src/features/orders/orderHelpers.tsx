@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import type {
   Order,
   OrderItemConfig,
@@ -287,7 +288,7 @@ export function OrderDetailModal({
 export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }) {
   if (!order) return null;
 
-  return (
+  return createPortal(
     <div className="print-ticket">
       <section className="print-ticket-section print-ticket-customer">
         <h1>Pérez&apos;s Burger</h1>
@@ -342,7 +343,8 @@ export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }
           </>
         )}
       </section>
-    </div>
+    </div>,
+    document.body
   );
 }
 

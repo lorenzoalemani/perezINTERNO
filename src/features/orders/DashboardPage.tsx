@@ -159,9 +159,9 @@ export default function DashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4 sm:space-y-6">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
-        <button onClick={() => navigate('/pedidos/nuevo')} className="btn-primary w-full text-xl py-6">
+        <button onClick={() => navigate('/pedidos/nuevo')} className="btn-primary w-full py-5 text-lg sm:py-6 sm:text-xl">
           + NUEVO PEDIDO
         </button>
         <button type="button" onClick={loadStats} className="btn-secondary w-full px-4 py-4 text-base">
@@ -194,8 +194,8 @@ export default function DashboardPage() {
                   Horarios, capacidad, pedidos, cobro, preparacion e impresion en una sola planilla.
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
-                <button type="button" onClick={() => navigate('/pedidos/nuevo')} className="rounded-lg bg-red-700 px-3 py-2 text-sm font-black text-white hover:bg-red-800">
+              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
+                <button type="button" onClick={() => navigate('/pedidos/nuevo')} className="min-h-11 rounded-lg bg-red-700 px-3 py-2 text-sm font-black text-white hover:bg-red-800">
                   Nuevo pedido
                 </button>
                 <button
@@ -208,7 +208,7 @@ export default function DashboardPage() {
                         : 'Los pedidos fueron ocultados solo de la planilla del Dashboard.'
                     );
                   }}
-                  className="rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-black text-gray-700 hover:border-red-300 hover:text-red-800"
+                  className="min-h-11 rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-black text-gray-700 hover:border-red-300 hover:text-red-800"
                 >
                   {scheduleCleared ? 'Restaurar pedidos' : 'Limpiar pedidos'}
                 </button>
@@ -231,6 +231,7 @@ export default function DashboardPage() {
                 emptyText="Todavia no hay pedidos para operar hoy."
                 rows={scheduleRows}
                 savingOrderId={savingOrderId}
+                canViewMoney={isAdmin}
                 onCancel={cancelOrder}
                 onCharge={setChargeOrder}
                 onNewOrder={(time) => navigate(`/pedidos/nuevo?pickup=${encodeURIComponent(time)}`)}
@@ -240,7 +241,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className={`grid grid-cols-2 gap-4 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
+          <section className={`grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 sm:gap-4 ${isAdmin ? 'md:grid-cols-3' : ''}`}>
             {isAdmin && <StatCard label="Ventas hoy" value={formatMoney(stats.salesTotal)} highlight />}
             <StatCard label="Pedidos hoy" value={String(stats.validOrderCount)} />
             {isAdmin && <StatCard label="Ticket promedio" value={formatMoney(stats.averageTicket)} />}
@@ -305,7 +306,7 @@ export default function DashboardPage() {
             {stats.topProductsByQuantity.length === 0 ? (
               <p className="text-sm text-gray-500">Todavia no hay productos vendidos en el periodo.</p>
             ) : (
-              <div className="grid gap-2 md:grid-cols-2">
+              <div className="grid gap-2 sm:grid-cols-2">
                 {stats.topProductsByQuantity.slice(0, 4).map((product, index) => (
                   <div key={product.name} className="flex items-center justify-between rounded-lg bg-gray-50 p-3">
                     <span className="font-semibold">
@@ -431,6 +432,7 @@ function ScheduleTable({
   rows,
   emptyText,
   savingOrderId,
+  canViewMoney,
   onCharge,
   onCancel,
   onNewOrder,
@@ -440,6 +442,7 @@ function ScheduleTable({
   rows: ScheduleRow[];
   emptyText: string;
   savingOrderId: string | null;
+  canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
   onNewOrder: (time: string) => void;
@@ -506,6 +509,7 @@ function ScheduleTable({
                     <OrderOperationRow
                       key={order.id}
                       isSaving={savingOrderId === order.id}
+                      canViewMoney={canViewMoney}
                       order={order}
                       onCancel={onCancel}
                       onCharge={onCharge}
@@ -544,6 +548,7 @@ function CompactCell({ label, value, className = '' }: { label: string; value: s
 function OrderOperationRow({
   order,
   isSaving,
+  canViewMoney,
   onCharge,
   onCancel,
   onPrint,
@@ -551,6 +556,7 @@ function OrderOperationRow({
 }: {
   order: OrderWithItems;
   isSaving: boolean;
+  canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
   onPrint: (order: OrderWithItems) => void;
@@ -560,7 +566,7 @@ function OrderOperationRow({
 
   return (
     <div className="rounded-md border border-red-100 bg-white p-2 shadow-sm">
-      <div className="grid gap-2 2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_86px_minmax(300px,auto)] 2xl:items-center">
+      <div className={`grid gap-2 ${canViewMoney ? '2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_86px_minmax(300px,auto)]' : '2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_minmax(300px,auto)]'} 2xl:items-center`}>
         <div className="flex items-center justify-between gap-2 2xl:block">
           <p className="text-base font-black text-red-800">#{order.order_number}</p>
           <p className="text-[11px] font-semibold text-gray-500">{getProductionCounts(order).burgers} hamb. · {getProductionCounts(order).medallions} med.</p>
@@ -573,7 +579,7 @@ function OrderOperationRow({
         </div>
         <StatusBadge status={order.status} />
         <PaymentBadge status={order.payment_status} />
-        <p className="text-sm font-black">{formatMoney(Number(order.total))}</p>
+        {canViewMoney && <p className="text-sm font-black">{formatMoney(Number(order.total))}</p>}
         <div className="flex flex-wrap justify-end gap-1.5">
           <button
             type="button"

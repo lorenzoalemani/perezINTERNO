@@ -54,7 +54,7 @@ export default function StatsPage() {
             {isAdmin ? 'Ventas, productos, horarios y estado operativo.' : 'Productos, horarios y estado operativo.'}
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-2 sm:flex">
           <select
             value={period}
             onChange={(event) => setPeriod(event.target.value as PeriodKey)}
@@ -82,7 +82,7 @@ export default function StatsPage() {
         <div className="card py-12 text-center text-gray-500">Cargando estadisticas...</div>
       ) : (
         <>
-          <section className={`grid grid-cols-2 gap-4 ${isAdmin ? 'md:grid-cols-4' : ''}`}>
+          <section className={`grid grid-cols-1 gap-3 min-[430px]:grid-cols-2 sm:gap-4 ${isAdmin ? 'md:grid-cols-4' : ''}`}>
             {isAdmin && <Metric label="Ventas" value={formatMoney(stats.salesTotal)} highlight />}
             <Metric label="Pedidos validos" value={String(stats.validOrderCount)} />
             {isAdmin && <Metric label="Ticket promedio" value={formatMoney(stats.averageTicket)} />}

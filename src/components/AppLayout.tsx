@@ -15,10 +15,10 @@ export default function AppLayout() {
 
   return (
     <div className="perez-shell flex min-h-screen flex-col">
-      <header className="brand-header sticky top-0 z-30 px-4 py-3 backdrop-blur">
+      <header className="brand-header sticky top-0 z-30 px-3 py-2 sm:px-4 sm:py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-5">
-            <span className="brand-mark grid h-11 w-14 shrink-0 place-items-center rounded-md p-1">
+            <span className="brand-mark grid h-10 w-12 shrink-0 place-items-center rounded-md p-1 sm:h-11 sm:w-14">
                 <img
                   src="/brand/perez-logo-real.jpg"
                   alt="Perez's Burger"
@@ -76,7 +76,7 @@ export default function AppLayout() {
         ))}
       </nav>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 p-4">
+      <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4">
         <Outlet />
       </main>
     </div>

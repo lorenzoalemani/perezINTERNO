@@ -1,0 +1,596 @@
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useAuth } from '../auth/AuthContext';
+import { supabase } from '../../lib/supabase';
+import type { CashMovement, CashRegister, Payment } from '../../types/database';
+
+type Message = { type: 'success' | 'error'; text: string };
+type MovementType = 'income' | 'expense';
+
+type RegisterSummary = {
+  register: CashRegister;
+  cashSales: number;
+  transferSales: number;
+  manualIncome: number;
+  expenses: number;
+  expectedCash: number;
+  totalSold: number;
+};
+
+const moneyFormatter = new Intl.NumberFormat('es-AR', {
+  style: 'currency',
+  currency: 'ARS',
+  maximumFractionDigits: 0,
+});
+
+function formatMoney(value: number) {
+  return moneyFormatter.format(value);
+}
+
+function parseAmount(value: string) {
+  return Number(value.replace(/\./g, '').replace(',', '.'));
+}
+
+function todayBusinessDate() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function dayRange(date: string) {
+  const [year, month, day] = date.split('-').map(Number);
+  const start = new Date(year, month - 1, day, 0, 0, 0, 0);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 1);
+  return { from: start.toISOString(), to: end.toISOString() };
+}
+
+function formatDate(value: string) {
+  return new Date(`${value}T00:00:00`).toLocaleDateString('es-AR');
+}
+
+function formatDateTime(value: string | null) {
+  if (!value) return '-';
+  return new Date(value).toLocaleString('es-AR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function calculateSummary(register: CashRegister, payments: Payment[], movements: CashMovement[]): RegisterSummary {
+  const cashSales = payments
+    .filter((payment) => payment.method === 'cash')
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const transferSales = payments
+    .filter((payment) => payment.method === 'transfer')
+    .reduce((sum, payment) => sum + Number(payment.amount), 0);
+  const manualIncome = movements
+    .filter((movement) => movement.type === 'income')
+    .reduce((sum, movement) => sum + Number(movement.amount), 0);
+  const expenses = movements
+    .filter((movement) => movement.type === 'expense')
+    .reduce((sum, movement) => sum + Number(movement.amount), 0);
+  const expectedCash = Number(register.opening_amount) + cashSales + manualIncome - expenses;
+
+  return {
+    register,
+    cashSales,
+    transferSales,
+    manualIncome,
+    expenses,
+    expectedCash,
+    totalSold: cashSales + transferSales,
+  };
+}
+
+export default function CashPage() {
+  const { profile } = useAuth();
+  const businessDate = todayBusinessDate();
+  const [register, setRegister] = useState<CashRegister | null>(null);
+  const [payments, setPayments] = useState<Payment[]>([]);
+  const [movements, setMovements] = useState<CashMovement[]>([]);
+  const [history, setHistory] = useState<RegisterSummary[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<Message | null>(null);
+  const [openingAmount, setOpeningAmount] = useState('');
+  const [movementType, setMovementType] = useState<MovementType>('income');
+  const [movementAmount, setMovementAmount] = useState('');
+  const [movementDescription, setMovementDescription] = useState('');
+  const [closingAmount, setClosingAmount] = useState('');
+
+  useEffect(() => {
+    loadCashData();
+  }, []);
+
+  async function loadCashData() {
+    setLoading(true);
+    setMessage(null);
+
+    const range = dayRange(businessDate);
+    const [registerResult, paymentsResult] = await Promise.all([
+      supabase.from('cash_registers').select('*').eq('business_date', businessDate).maybeSingle(),
+      supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
+    ]);
+
+    if (registerResult.error || paymentsResult.error) {
+      setMessage({ type: 'error', text: 'No se pudo cargar la caja del dia.' });
+      setLoading(false);
+      return;
+    }
+
+    const currentRegister = (registerResult.data as CashRegister | null) ?? null;
+    setRegister(currentRegister);
+    setPayments((paymentsResult.data ?? []) as Payment[]);
+
+    if (currentRegister) {
+      const { data, error } = await supabase
+        .from('cash_movements')
+        .select('*')
+        .eq('register_id', currentRegister.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        setMessage({ type: 'error', text: 'No se pudieron cargar los movimientos de caja.' });
+      } else {
+        setMovements((data ?? []) as CashMovement[]);
+      }
+    } else {
+      setMovements([]);
+    }
+
+    await loadHistory();
+    setLoading(false);
+  }
+
+  async function loadHistory() {
+    const { data, error } = await supabase
+      .from('cash_registers')
+      .select('*')
+      .order('business_date', { ascending: false })
+      .limit(20);
+
+    if (error) return;
+
+    const registers = (data ?? []) as CashRegister[];
+    const summaries = await Promise.all(
+      registers.map(async (cashRegister) => {
+        const range = dayRange(cashRegister.business_date);
+        const [paymentsResult, movementsResult] = await Promise.all([
+          supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
+          supabase.from('cash_movements').select('*').eq('register_id', cashRegister.id),
+        ]);
+        return calculateSummary(
+          cashRegister,
+          (paymentsResult.data ?? []) as Payment[],
+          (movementsResult.data ?? []) as CashMovement[]
+        );
+      })
+    );
+    setHistory(summaries);
+  }
+
+  async function openRegister(event: FormEvent) {
+    event.preventDefault();
+    if (!profile) {
+      setMessage({ type: 'error', text: 'La sesion expiro. Vuelve a iniciar sesion.' });
+      return;
+    }
+
+    const amount = parseAmount(openingAmount);
+    if (!Number.isFinite(amount) || amount < 0) {
+      setMessage({ type: 'error', text: 'Ingresa un monto inicial valido.' });
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await supabase.from('cash_registers').insert({
+      business_date: businessDate,
+      opening_amount: amount,
+      opened_by: profile.id,
+    });
+    setSaving(false);
+
+    if (error) {
+      setMessage({ type: 'error', text: 'No se pudo abrir la caja. Verifica si ya existe caja para hoy.' });
+      return;
+    }
+
+    setOpeningAmount('');
+    setMessage({ type: 'success', text: 'Caja abierta correctamente.' });
+    await loadCashData();
+  }
+
+  async function createMovement(event: FormEvent) {
+    event.preventDefault();
+    if (!profile || !register) return;
+    if (register.closed_at) {
+      setMessage({ type: 'error', text: 'La caja esta cerrada. No se pueden registrar nuevos movimientos.' });
+      return;
+    }
+
+    const amount = parseAmount(movementAmount);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setMessage({ type: 'error', text: 'El monto del movimiento debe ser mayor a cero.' });
+      return;
+    }
+    if (!movementDescription.trim()) {
+      setMessage({ type: 'error', text: 'Agrega una descripcion para el movimiento.' });
+      return;
+    }
+
+    setSaving(true);
+    const { error } = await supabase.from('cash_movements').insert({
+      register_id: register.id,
+      type: movementType,
+      amount,
+      description: movementDescription.trim(),
+      created_by: profile.id,
+    });
+    setSaving(false);
+
+    if (error) {
+      setMessage({ type: 'error', text: 'No se pudo registrar el movimiento.' });
+      return;
+    }
+
+    setMovementAmount('');
+    setMovementDescription('');
+    setMessage({ type: 'success', text: 'Movimiento registrado correctamente.' });
+    await loadCashData();
+  }
+
+  async function closeRegister(event: FormEvent) {
+    event.preventDefault();
+    if (!profile || !register || !summary) return;
+    if (register.closed_at) return;
+
+    const counted = parseAmount(closingAmount);
+    if (!Number.isFinite(counted) || counted < 0) {
+      setMessage({ type: 'error', text: 'Ingresa el efectivo contado.' });
+      return;
+    }
+
+    const difference = counted - summary.expectedCash;
+    if (!window.confirm(`Cerrar caja con diferencia de ${formatMoney(difference)}?`)) return;
+
+    setSaving(true);
+    const closePayload = {
+      closing_amount: counted,
+      closing_difference_amount: difference,
+      closed_by: profile.id,
+      closed_at: new Date().toISOString(),
+    };
+
+    let closeResult = await supabase
+      .from('cash_registers')
+      .update(closePayload)
+      .eq('id', register.id)
+      .is('closed_at', null)
+      .select()
+      .maybeSingle();
+
+    if (closeResult.error && closeResult.error.message.includes('closing_difference_amount')) {
+      closeResult = await supabase
+        .from('cash_registers')
+        .update({
+          closing_amount: counted,
+          closed_by: profile.id,
+          closed_at: closePayload.closed_at,
+        })
+        .eq('id', register.id)
+        .is('closed_at', null)
+        .select()
+        .maybeSingle();
+    }
+
+    setSaving(false);
+
+    if (closeResult.error) {
+      setMessage({ type: 'error', text: `No se pudo cerrar la caja: ${closeResult.error.message}` });
+      return;
+    }
+
+    if (!closeResult.data) {
+      setMessage({
+        type: 'error',
+        text: 'No se pudo cerrar la caja. Puede que ya este cerrada o que tu usuario no tenga permisos.',
+      });
+      return;
+    }
+
+    setClosingAmount('');
+    setRegister(closeResult.data as CashRegister);
+    setMessage({ type: 'success', text: 'Caja cerrada correctamente.' });
+    await loadCashData();
+  }
+
+  const summary = useMemo(
+    () => (register ? calculateSummary(register, payments, movements) : null),
+    [register, payments, movements]
+  );
+
+  const closingCounted = parseAmount(closingAmount);
+  const closingDifference = summary && Number.isFinite(closingCounted) ? closingCounted - summary.expectedCash : null;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Caja del dia</h1>
+          <p className="text-sm text-gray-500">Fecha: {formatDate(businessDate)}</p>
+        </div>
+        <button type="button" onClick={loadCashData} className="btn-secondary px-4 py-3 text-base">
+          Actualizar
+        </button>
+      </div>
+
+      {message && (
+        <div
+          className={`rounded-lg border px-4 py-3 text-sm ${
+            message.type === 'success'
+              ? 'border-green-200 bg-green-50 text-green-700'
+              : 'border-red-200 bg-red-50 text-red-700'
+          }`}
+        >
+          {message.text}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="card py-12 text-center text-gray-500">Cargando caja...</div>
+      ) : !register ? (
+        <form onSubmit={openRegister} className="card max-w-xl space-y-4">
+          <div>
+            <h2 className="text-xl font-bold">Abrir caja</h2>
+            <p className="text-sm text-gray-500">Registra el efectivo inicial. No cuenta como venta.</p>
+          </div>
+          <label className="block">
+            <span className="text-sm font-semibold text-gray-700">Monto inicial</span>
+            <input
+              value={openingAmount}
+              onChange={(event) => setOpeningAmount(event.target.value)}
+              inputMode="decimal"
+              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-xl font-bold"
+              placeholder="0"
+            />
+          </label>
+          <button type="submit" disabled={saving} className="btn-primary">
+            {saving ? 'Abriendo...' : 'Abrir caja'}
+          </button>
+        </form>
+      ) : summary ? (
+        <>
+          <section className="grid gap-4 md:grid-cols-3">
+            <Metric label="Monto inicial" value={summary.register.opening_amount} />
+            <Metric label="Ventas efectivo" value={summary.cashSales} highlight />
+            <Metric label="Ventas transferencia" value={summary.transferSales} />
+            <Metric label="Ingresos manuales" value={summary.manualIncome} />
+            <Metric label="Egresos" value={summary.expenses} danger />
+            <Metric label="Total vendido" value={summary.totalSold} />
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_420px]">
+            <div className="card space-y-4">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold">Resumen</h2>
+                  <p className="text-sm text-gray-500">
+                    {register.closed_at ? `Caja cerrada: ${formatDateTime(register.closed_at)}` : 'Caja abierta'}
+                  </p>
+                </div>
+                <span
+                  className={`rounded-full px-3 py-1 text-sm font-bold ${
+                    register.closed_at ? 'bg-gray-100 text-gray-700' : 'bg-green-100 text-green-800'
+                  }`}
+                >
+                  {register.closed_at ? 'Cerrada' : 'Abierta'}
+                </span>
+              </div>
+
+              <div className="rounded-lg bg-orange-50 p-5">
+                <p className="text-sm font-semibold uppercase text-orange-800">Efectivo esperado</p>
+                <p className="text-4xl font-black text-gray-900">{formatMoney(summary.expectedCash)}</p>
+                <p className="mt-2 text-sm text-gray-600">
+                  Apertura + ventas efectivo + ingresos - egresos. Las transferencias no entran en caja fisica.
+                </p>
+              </div>
+
+              {register.closed_at && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Metric label="Efectivo contado" value={Number(register.closing_amount ?? 0)} />
+                  <Metric
+                    label={Number(register.closing_difference_amount ?? 0) < 0 ? 'Faltante' : 'Sobrante'}
+                    value={Math.abs(Number(register.closing_difference_amount ?? 0))}
+                    danger={Number(register.closing_difference_amount ?? 0) < 0}
+                    highlight={Number(register.closing_difference_amount ?? 0) >= 0}
+                  />
+                </div>
+              )}
+
+              <div>
+                <h3 className="mb-3 font-bold">Movimientos manuales</h3>
+                {movements.length === 0 ? (
+                  <div className="rounded-lg border border-dashed border-gray-300 p-5 text-center text-sm text-gray-500">
+                    Sin movimientos manuales.
+                  </div>
+                ) : (
+                  <div className="divide-y divide-gray-100 rounded-lg border border-gray-200">
+                    {movements.map((movement) => (
+                      <div key={movement.id} className="flex items-center justify-between gap-3 p-3">
+                        <div>
+                          <p className="font-semibold">{movement.description}</p>
+                          <p className="text-sm text-gray-500">{formatDateTime(movement.created_at)}</p>
+                        </div>
+                        <p className={`font-bold ${movement.type === 'expense' ? 'text-red-700' : 'text-green-700'}`}>
+                          {movement.type === 'expense' ? '-' : '+'}
+                          {formatMoney(Number(movement.amount))}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <aside className="space-y-4">
+              {!register.closed_at && (
+                <form onSubmit={createMovement} className="card space-y-4">
+                  <h2 className="text-xl font-bold">Nuevo movimiento</h2>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setMovementType('income')}
+                      className={`rounded-lg border-2 px-3 py-3 font-bold ${
+                        movementType === 'income' ? 'border-green-500 bg-green-50 text-green-800' : 'border-gray-200'
+                      }`}
+                    >
+                      Ingreso
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMovementType('expense')}
+                      className={`rounded-lg border-2 px-3 py-3 font-bold ${
+                        movementType === 'expense' ? 'border-red-500 bg-red-50 text-red-800' : 'border-gray-200'
+                      }`}
+                    >
+                      Egreso
+                    </button>
+                  </div>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-700">Monto</span>
+                    <input
+                      value={movementAmount}
+                      onChange={(event) => setMovementAmount(event.target.value)}
+                      inputMode="decimal"
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-700">Descripcion</span>
+                    <input
+                      value={movementDescription}
+                      onChange={(event) => setMovementDescription(event.target.value)}
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3"
+                    />
+                  </label>
+                  <button type="submit" disabled={saving} className="btn-primary w-full">
+                    Registrar movimiento
+                  </button>
+                </form>
+              )}
+
+              {!register.closed_at && (
+                <form onSubmit={closeRegister} className="card space-y-4">
+                  <h2 className="text-xl font-bold">Cerrar caja</h2>
+                  <div className="rounded-lg bg-gray-50 p-4">
+                    <p className="text-sm font-semibold text-gray-500">Efectivo esperado</p>
+                    <p className="text-2xl font-black">{formatMoney(summary.expectedCash)}</p>
+                  </div>
+                  <label className="block">
+                    <span className="text-sm font-semibold text-gray-700">Efectivo contado</span>
+                    <input
+                      value={closingAmount}
+                      onChange={(event) => setClosingAmount(event.target.value)}
+                      inputMode="decimal"
+                      className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-xl font-bold"
+                    />
+                  </label>
+                  {closingDifference !== null && (
+                    <div className="rounded-lg bg-gray-50 p-4">
+                      <p className={`text-xl font-bold ${closingDifference < 0 ? 'text-red-700' : 'text-green-700'}`}>
+                        {closingDifference < 0 ? 'Faltante' : 'Sobrante'}:{' '}
+                        {formatMoney(Math.abs(closingDifference))}
+                      </p>
+                    </div>
+                  )}
+                  <button type="submit" disabled={saving} className="btn-primary w-full">
+                    Cerrar caja
+                  </button>
+                </form>
+              )}
+            </aside>
+          </section>
+        </>
+      ) : null}
+
+      <section className="card space-y-4">
+        <h2 className="text-xl font-bold">Historial de cajas</h2>
+        {history.length === 0 ? (
+          <p className="text-sm text-gray-500">Todavia no hay cajas registradas.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 text-sm">
+              <thead className="bg-gray-50 text-left text-xs font-semibold uppercase text-gray-500">
+                <tr>
+                  <th className="px-3 py-3">Fecha</th>
+                  <th className="px-3 py-3">Apertura</th>
+                  <th className="px-3 py-3">Efectivo</th>
+                  <th className="px-3 py-3">Transferencia</th>
+                  <th className="px-3 py-3">Ingresos</th>
+                  <th className="px-3 py-3">Egresos</th>
+                  <th className="px-3 py-3">Esperado</th>
+                  <th className="px-3 py-3">Contado</th>
+                  <th className="px-3 py-3">Diferencia</th>
+                  <th className="px-3 py-3">Estado</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {history.map((item) => (
+                  <tr key={item.register.id}>
+                    <td className="px-3 py-3 font-semibold">{formatDate(item.register.business_date)}</td>
+                    <td className="px-3 py-3">{formatMoney(Number(item.register.opening_amount))}</td>
+                    <td className="px-3 py-3">{formatMoney(item.cashSales)}</td>
+                    <td className="px-3 py-3">{formatMoney(item.transferSales)}</td>
+                    <td className="px-3 py-3">{formatMoney(item.manualIncome)}</td>
+                    <td className="px-3 py-3">{formatMoney(item.expenses)}</td>
+                    <td className="px-3 py-3 font-semibold">{formatMoney(item.expectedCash)}</td>
+                    <td className="px-3 py-3">
+                      {item.register.closing_amount === null ? '-' : formatMoney(Number(item.register.closing_amount))}
+                    </td>
+                    <td className="px-3 py-3">
+                      {item.register.closing_difference_amount === null
+                        ? '-'
+                        : formatMoney(Number(item.register.closing_difference_amount))}
+                    </td>
+                    <td className="px-3 py-3">{item.register.closed_at ? 'Cerrada' : 'Abierta'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  highlight,
+  danger,
+}: {
+  label: string;
+  value: number;
+  highlight?: boolean;
+  danger?: boolean;
+}) {
+  return (
+    <div
+      className={`rounded-lg border p-4 ${
+        danger
+          ? 'border-red-200 bg-red-50'
+          : highlight
+            ? 'border-green-200 bg-green-50'
+            : 'border-gray-200 bg-white'
+      }`}
+    >
+      <p className="text-sm font-semibold text-gray-500">{label}</p>
+      <p className="mt-1 text-2xl font-black text-gray-900">{formatMoney(value)}</p>
+    </div>
+  );
+}

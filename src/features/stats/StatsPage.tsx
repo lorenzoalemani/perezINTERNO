@@ -50,7 +50,9 @@ export default function StatsPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Estadisticas</h1>
-          <p className="text-sm text-gray-500">Ventas, productos, horarios y estado operativo.</p>
+          <p className="text-sm text-gray-500">
+            {isAdmin ? 'Ventas, productos, horarios y estado operativo.' : 'Productos, horarios y estado operativo.'}
+          </p>
         </div>
         <div className="flex gap-2">
           <select
@@ -80,15 +82,15 @@ export default function StatsPage() {
         <div className="card py-12 text-center text-gray-500">Cargando estadisticas...</div>
       ) : (
         <>
-          <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <Metric label="Ventas" value={formatMoney(stats.salesTotal)} highlight />
+          <section className={`grid grid-cols-2 gap-4 ${isAdmin ? 'md:grid-cols-4' : ''}`}>
+            {isAdmin && <Metric label="Ventas" value={formatMoney(stats.salesTotal)} highlight />}
             <Metric label="Pedidos validos" value={String(stats.validOrderCount)} />
-            <Metric label="Ticket promedio" value={formatMoney(stats.averageTicket)} />
+            {isAdmin && <Metric label="Ticket promedio" value={formatMoney(stats.averageTicket)} />}
             <Metric label="Cancelaciones" value={`${stats.cancelledCount} (${stats.cancellationPercent.toFixed(1)}%)`} />
           </section>
 
-          <section className={`grid gap-4 ${isAdmin ? 'lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]' : ''}`}>
-            {isAdmin && <div className="card space-y-4">
+          {isAdmin && <section className="grid gap-4 lg:grid-cols-[minmax(0,1.4fr)_minmax(320px,0.6fr)]">
+            <div className="card space-y-4">
               <h2 className="text-xl font-bold">Ventas por dia</h2>
               <p className="text-sm text-gray-500">Ventas validas: pedidos pagados no cancelados.</p>
               <BarChart
@@ -98,14 +100,14 @@ export default function StatsPage() {
                 getValue={(item) => item.value}
                 formatValue={formatMoney}
               />
-            </div>}
+            </div>
 
             <div className="card space-y-4">
               <h2 className="text-xl font-bold">Metodos de pago</h2>
               <PaymentRow label="Efectivo" amount={stats.cashTotal} percent={stats.cashPercent} />
               <PaymentRow label="Transferencia" amount={stats.transferTotal} percent={stats.transferPercent} />
             </div>
-          </section>
+          </section>}
 
           <section className="grid gap-4 lg:grid-cols-2">
             <RankingCard
@@ -114,12 +116,12 @@ export default function StatsPage() {
               emptyText="No hay ventas de productos en este periodo."
               renderValue={(item) => `${item.quantity} unidades`}
             />
-            <RankingCard
+            {isAdmin && <RankingCard
               title="Productos que mas facturan"
               items={stats.topProductsByRevenue}
               emptyText="No hay facturacion de productos en este periodo."
               renderValue={(item) => formatMoney(item.revenue)}
-            />
+            />}
           </section>
 
           <section className="grid gap-4 lg:grid-cols-2">

@@ -15,12 +15,18 @@ Esto es lo entregado hasta ahora: **configuración del proyecto + Supabase + aut
 ## Cómo levantarlo
 
 1. Creá un proyecto en supabase.com.
-2. En el SQL Editor de Supabase, ejecutá el contenido de `supabase/migrations/0001_init.sql`.
-3. Creá un usuario desde Authentication > Users, y después insertá su fila correspondiente en `profiles` con `role = 'admin'`:
+2. En el SQL Editor de Supabase, ejecutá las migraciones de `supabase/migrations` en orden numérico (`0001` a `0008`). La `0006` bloquea la caja para el rol de cajera también desde la base de datos y la `0008` impide que alguien se asigne un rol por la API.
+3. Creá un usuario desde **Authentication > Users > Add user** y después insertá su fila correspondiente en `profiles`. Para un administrador, usá `role = 'admin'`:
    ```sql
    insert into profiles (id, full_name, role)
    values ('UUID_DEL_USUARIO', 'Tu Nombre', 'admin');
    ```
+   Para crear una cajera, repetí el alta en Authentication y ejecutá:
+   ```sql
+   insert into profiles (id, full_name, role)
+   values ('UUID_DE_LA_CAJERA', 'Nombre de la cajera', 'counter');
+   ```
+   El rol técnico `counter` se muestra como **Cajera** en la aplicación. Puede ver solamente estadísticas operativas (productos, horarios y estados); caja e indicadores monetarios quedan reservados para `admin`.
 4. Copiá `.env.example` a `.env` y completá con la URL y anon key de tu proyecto Supabase (Project Settings > API).
 5. Instalá dependencias y corré en modo desarrollo:
    ```bash

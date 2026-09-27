@@ -231,7 +231,6 @@ export default function DashboardPage() {
                 emptyText="Todavia no hay pedidos para operar hoy."
                 rows={scheduleRows}
                 savingOrderId={savingOrderId}
-                canViewMoney={isAdmin}
                 onCancel={cancelOrder}
                 onCharge={setChargeOrder}
                 onNewOrder={(time) => navigate(`/pedidos/nuevo?pickup=${encodeURIComponent(time)}`)}
@@ -241,7 +240,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className={`grid grid-cols-2 gap-4 ${isAdmin ? 'md:grid-cols-3' : ''}`}>
+          <section className={`grid grid-cols-2 gap-4 ${isAdmin ? 'md:grid-cols-3' : 'md:grid-cols-2'}`}>
             {isAdmin && <StatCard label="Ventas hoy" value={formatMoney(stats.salesTotal)} highlight />}
             <StatCard label="Pedidos hoy" value={String(stats.validOrderCount)} />
             {isAdmin && <StatCard label="Ticket promedio" value={formatMoney(stats.averageTicket)} />}
@@ -432,7 +431,6 @@ function ScheduleTable({
   rows,
   emptyText,
   savingOrderId,
-  canViewMoney,
   onCharge,
   onCancel,
   onNewOrder,
@@ -442,7 +440,6 @@ function ScheduleTable({
   rows: ScheduleRow[];
   emptyText: string;
   savingOrderId: string | null;
-  canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
   onNewOrder: (time: string) => void;
@@ -509,7 +506,6 @@ function ScheduleTable({
                     <OrderOperationRow
                       key={order.id}
                       isSaving={savingOrderId === order.id}
-                      canViewMoney={canViewMoney}
                       order={order}
                       onCancel={onCancel}
                       onCharge={onCharge}
@@ -548,7 +544,6 @@ function CompactCell({ label, value, className = '' }: { label: string; value: s
 function OrderOperationRow({
   order,
   isSaving,
-  canViewMoney,
   onCharge,
   onCancel,
   onPrint,
@@ -556,7 +551,6 @@ function OrderOperationRow({
 }: {
   order: OrderWithItems;
   isSaving: boolean;
-  canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
   onPrint: (order: OrderWithItems) => void;
@@ -566,7 +560,7 @@ function OrderOperationRow({
 
   return (
     <div className="rounded-md border border-red-100 bg-white p-2 shadow-sm">
-      <div className={`grid gap-2 ${canViewMoney ? '2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_86px_minmax(300px,auto)]' : '2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_minmax(300px,auto)]'} 2xl:items-center`}>
+      <div className="grid gap-2 2xl:grid-cols-[82px_minmax(150px,1fr)_120px_120px_86px_minmax(300px,auto)] 2xl:items-center">
         <div className="flex items-center justify-between gap-2 2xl:block">
           <p className="text-base font-black text-red-800">#{order.order_number}</p>
           <p className="text-[11px] font-semibold text-gray-500">{getProductionCounts(order).burgers} hamb. · {getProductionCounts(order).medallions} med.</p>
@@ -579,7 +573,7 @@ function OrderOperationRow({
         </div>
         <StatusBadge status={order.status} />
         <PaymentBadge status={order.payment_status} />
-        {canViewMoney && <p className="text-sm font-black">{formatMoney(Number(order.total))}</p>}
+        <p className="text-sm font-black">{formatMoney(Number(order.total))}</p>
         <div className="flex flex-wrap justify-end gap-1.5">
           <button
             type="button"

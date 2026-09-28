@@ -200,10 +200,7 @@ export default function DashboardPage() {
                   Horarios, capacidad, pedidos, cobro, preparacion e impresion en una sola planilla.
                 </p>
               </div>
-              <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-                <button type="button" onClick={() => navigate('/pedidos/nuevo')} className="min-h-11 rounded-lg bg-red-700 px-3 py-2 text-sm font-black text-white hover:bg-red-800">
-                  Nuevo pedido
-                </button>
+              <div className="flex justify-start sm:justify-end">
                 <button
                   type="button"
                   onClick={() => {
@@ -465,7 +462,7 @@ function ScheduleTable({
 
   return (
     <div className="space-y-2">
-      <div className="perez-table-head hidden rounded-lg px-3 py-2 text-xs font-black uppercase lg:grid lg:grid-cols-[86px_150px_96px_96px_96px_minmax(0,1fr)_130px] lg:gap-2">
+      <div className="perez-table-head hidden rounded-lg px-3 py-2 text-xs font-black uppercase lg:grid lg:grid-cols-[74px_120px_76px_76px_76px_minmax(220px,1fr)_110px] lg:gap-2">
         <span>Horario</span>
         <span>Carga</span>
         <span>Hamburguesas</span>
@@ -484,7 +481,7 @@ function ScheduleTable({
               isFull ? 'border-red-200 bg-red-50' : isHigh ? 'border-yellow-200 bg-yellow-50' : 'border-red-100 bg-white'
             }`}
           >
-            <div className="grid gap-2 lg:grid-cols-[86px_150px_96px_96px_96px_minmax(0,1fr)_130px] lg:items-start">
+            <div className="grid gap-2 lg:grid-cols-[74px_120px_76px_76px_76px_minmax(220px,1fr)_110px] lg:items-start">
               <div className="flex items-center justify-between gap-2 lg:block">
                 <span className="text-xs font-bold uppercase text-gray-500 lg:hidden">Horario</span>
                 <span className="text-xl font-black leading-none text-gray-900">{row.time}</span>

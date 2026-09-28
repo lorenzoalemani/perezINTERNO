@@ -285,8 +285,48 @@ export function OrderDetailModal({
   );
 }
 
+type KitchenTicketItem = {
+  key: string;
+  name: string;
+  quantity: number;
+  notes: Map<string, number>;
+};
+
+function getTicketProductName(item: OrderItemWithModifiers) {
+  const configLines = getOrderItemConfigLines({ item_config: item.item_config, item_comment: null });
+  return [item.product_name_snapshot, ...configLines].join(' ');
+}
+
+function getTicketUnitPrice(item: OrderItemWithModifiers) {
+  const quantity = Number(item.quantity);
+  return quantity > 0 ? Number(item.subtotal) / quantity : Number(item.unit_price_snapshot);
+}
+
+function getKitchenTicketItems(items: OrderItemWithModifiers[]) {
+  const grouped = new Map<string, KitchenTicketItem>();
+
+  for (const item of items) {
+    const modifierNames = item.order_item_modifiers.map((modifier) => modifier.name_snapshot);
+    const name = [getTicketProductName(item), ...modifierNames].join(' ');
+    const key = name.toLocaleLowerCase('es-AR');
+    const current = grouped.get(key) ?? { key, name, quantity: 0, notes: new Map<string, number>() };
+    const quantity = Number(item.quantity);
+    current.quantity += quantity;
+
+    const note = item.item_comment?.trim();
+    if (note) {
+      current.notes.set(note, (current.notes.get(note) ?? 0) + quantity);
+    }
+
+    grouped.set(key, current);
+  }
+
+  return [...grouped.values()];
+}
+
 export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }) {
   if (!order) return null;
+  const kitchenItems = getKitchenTicketItems(order.order_items);
 
   return createPortal(
     <div className="print-ticket">
@@ -301,10 +341,8 @@ export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }
         <div className="print-ticket-items">
           {order.order_items.map((item) => (
             <div key={item.id} className="print-ticket-item">
-              <p>{item.quantity} {item.product_name_snapshot}</p>
-              {getOrderItemConfigLines(item).map((line) => (
-                <p key={line} className="print-ticket-detail">{line}</p>
-              ))}
+              <p>{getTicketProductName(item)} ({item.quantity}x{formatMoney(getTicketUnitPrice(item))})</p>
+              {item.item_comment?.trim() && <p className="print-ticket-detail">(Aclaración: {item.item_comment.trim()})</p>}
             </div>
           ))}
         </div>
@@ -324,14 +362,11 @@ export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }
         <p>FECHA: {formatPickupDate(order.pickup_time)}</p>
         <hr />
         <div className="print-ticket-items">
-          {order.order_items.map((item) => (
-            <div key={item.id} className="print-ticket-item">
-              <p className="print-ticket-product">{item.quantity} {item.product_name_snapshot}</p>
-              {getOrderItemConfigLines(item).map((line) => (
-                <p key={line} className="print-ticket-detail">{line}</p>
-              ))}
-              {item.order_item_modifiers.map((modifier) => (
-                <p key={modifier.id} className="print-ticket-detail">{modifier.name_snapshot}</p>
+          {kitchenItems.map((item) => (
+            <div key={item.key} className="print-ticket-item">
+              <p className="print-ticket-product">{item.quantity} {item.name}</p>
+              {[...item.notes.entries()].map(([note, quantity]) => (
+                <p key={note} className="print-ticket-detail">(Aclaración: {quantity} {note})</p>
               ))}
             </div>
           ))}

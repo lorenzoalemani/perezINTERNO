@@ -29,7 +29,7 @@ export default function LoginPage() {
         <div className="space-y-3 text-center">
           <span className="brand-mark mx-auto grid h-20 w-32 place-items-center rounded-lg p-2">
             <img
-              src="/brand/perez-logo-real.jpg"
+              src="/brand/perez-logo.png"
               alt="Perez's Burger"
               className="h-full w-full rounded-md object-contain"
             />

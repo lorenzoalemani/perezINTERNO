@@ -224,7 +224,7 @@ export default function DashboardPage() {
             </div>
 
             <div className="rounded-lg border border-red-100 bg-white p-3">
-              <div className="mb-3 flex items-center justify-between">
+              <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <h3 className="font-black text-gray-900">Pedidos por horario</h3>
                 <span className="rounded-full bg-red-100 px-3 py-1 text-xs font-bold text-red-700">
                   {BURGER_CAPACITY_PER_SLOT} hamburguesas por horario
@@ -462,7 +462,7 @@ function ScheduleTable({
 
   return (
     <div className="space-y-2">
-      <div className="perez-table-head hidden rounded-lg px-3 py-2 text-xs font-black uppercase lg:grid lg:grid-cols-[74px_120px_76px_76px_76px_minmax(220px,1fr)_110px] lg:gap-2">
+      <div className="perez-table-head hidden rounded-lg px-3 py-2 text-xs font-black uppercase xl:grid xl:grid-cols-[76px_120px_100px_100px_90px_minmax(220px,1fr)_120px] xl:gap-2">
         <span>Horario</span>
         <span>Carga</span>
         <span>Hamburguesas</span>
@@ -481,9 +481,9 @@ function ScheduleTable({
               isFull ? 'border-red-200 bg-red-50' : isHigh ? 'border-yellow-200 bg-yellow-50' : 'border-red-100 bg-white'
             }`}
           >
-            <div className="grid gap-2 lg:grid-cols-[74px_120px_76px_76px_76px_minmax(220px,1fr)_110px] lg:items-start">
-              <div className="flex items-center justify-between gap-2 lg:block">
-                <span className="text-xs font-bold uppercase text-gray-500 lg:hidden">Horario</span>
+            <div className="grid gap-2 xl:grid-cols-[76px_120px_100px_100px_90px_minmax(220px,1fr)_120px] xl:items-start">
+              <div className="flex items-center justify-between gap-2 xl:block">
+                <span className="text-xs font-bold uppercase text-gray-500 xl:hidden">Horario</span>
                 <span className="text-xl font-black leading-none text-gray-900">{row.time}</span>
               </div>
               <div>
@@ -541,8 +541,8 @@ function ScheduleTable({
 
 function CompactCell({ label, value, className = '' }: { label: string; value: string; className?: string }) {
   return (
-    <div className="flex items-center justify-between gap-2 lg:block">
-      <span className="text-xs font-bold uppercase text-gray-500 lg:hidden">{label}</span>
+    <div className="flex items-center justify-between gap-2 xl:block">
+      <span className="text-xs font-bold uppercase text-gray-500 xl:hidden">{label}</span>
       <span className={`text-base font-black ${className}`}>{value}</span>
     </div>
   );

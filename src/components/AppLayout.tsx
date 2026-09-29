@@ -18,11 +18,11 @@ export default function AppLayout() {
       <header className="brand-header sticky top-0 z-30 px-3 py-2 sm:px-4 sm:py-3 backdrop-blur">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-5">
-            <span className="brand-mark grid h-10 w-12 shrink-0 place-items-center rounded-md p-1 sm:h-11 sm:w-14">
+            <span className="brand-mark grid h-11 w-24 shrink-0 place-items-center sm:h-12 sm:w-28">
                 <img
-                  src="/brand/perez-logo-real.jpg"
+                  src="/brand/perez-logo.png"
                   alt="Perez's Burger"
-                  className="h-full w-full rounded-md object-contain"
+                  className="h-full w-full object-contain"
                 />
             </span>
 

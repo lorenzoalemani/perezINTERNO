@@ -1,0 +1,14 @@
+{
+  "redirects": [
+    {
+      "source": "/admin",
+      "destination": "https://juani11299.github.io/perez-burger-control/",
+      "permanent": false
+    },
+    {
+      "source": "/admin/:path*",
+      "destination": "https://juani11299.github.io/perez-burger-control/:path*",
+      "permanent": false
+    }
+  ]
+}

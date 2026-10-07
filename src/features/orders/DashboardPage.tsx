@@ -20,10 +20,6 @@ import {
 import type { OrderItemConfig } from '../../types/database';
 import { BURGER_CAPACITY_PER_SLOT, PICKUP_TIME_OPTIONS } from './orderSchedule';
 
-function todayKey() {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -39,10 +35,11 @@ export default function DashboardPage() {
   const [chargeOrder, setChargeOrder] = useState<OrderWithItems | null>(null);
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
   const isPrintingRef = useRef(false);
-  const [scheduleCleared, setScheduleCleared] = useState(() => {
+  const [clearedBefore, setClearedBefore] = useState<string | null>(() => {
     try {
-      return localStorage.getItem('scheduleCleared') === todayKey();
-    } catch { return false; }
+      const stored = localStorage.getItem('scheduleClearedTimestamp');
+      return stored || null;
+    } catch { return null; }
   });
 
   useEffect(() => {
@@ -67,14 +64,16 @@ export default function DashboardPage() {
   }, []);
 
   const operativeOrders = useMemo(() => {
-    if (scheduleCleared) return [];
-
     const byId = new Map<string, OrderWithItems>();
     for (const order of todayOrders) {
+      // If a cleanup was performed, hide orders created prior to the cleanup timestamp
+      if (clearedBefore && new Date(order.created_at).getTime() <= new Date(clearedBefore).getTime()) {
+        continue;
+      }
       byId.set(order.id, order);
     }
     return [...byId.values()].sort((a, b) => getOrderSlot(a).localeCompare(getOrderSlot(b)) || a.order_number - b.order_number);
-  }, [scheduleCleared, todayOrders]);
+  }, [clearedBefore, todayOrders]);
   const scheduleRows = useMemo(() => buildScheduleRows(operativeOrders), [operativeOrders]);
   const dailyProduction = useMemo(
     () =>
@@ -214,24 +213,24 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    const newCleared = !scheduleCleared;
-                    setScheduleCleared(newCleared);
+                    const newTimestamp = clearedBefore ? null : new Date().toISOString();
+                    setClearedBefore(newTimestamp);
                     try {
-                      if (newCleared) {
-                        localStorage.setItem('scheduleCleared', todayKey());
+                      if (newTimestamp) {
+                        localStorage.setItem('scheduleClearedTimestamp', newTimestamp);
                       } else {
-                        localStorage.removeItem('scheduleCleared');
+                        localStorage.removeItem('scheduleClearedTimestamp');
                       }
                     } catch { /* ignore */ }
                     setMessage(
-                      newCleared
-                        ? 'Los pedidos fueron limpiados de la planilla.'
+                      newTimestamp
+                        ? 'Los pedidos existentes fueron limpiados de la planilla. Los nuevos pedidos aparecerán normalmente.'
                         : 'Los pedidos volvieron a mostrarse en la planilla.'
                     );
                   }}
                   className="min-h-11 rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-black text-gray-700 hover:border-red-300 hover:text-red-800"
                 >
-                  {scheduleCleared ? 'Restaurar pedidos' : 'Limpiar pedidos'}
+                  {clearedBefore ? 'Restaurar pedidos' : 'Limpiar pedidos'}
                 </button>
               </div>
             </div>

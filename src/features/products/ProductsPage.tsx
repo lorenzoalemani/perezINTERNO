@@ -152,7 +152,7 @@ export default function ProductsPage() {
     [modifiers]
   );
 
-  const activeModifiers = modifiers.filter((modifier) => modifier.active);
+
 
   const filteredProducts = products.filter((product) => {
     const matchesCategory = categoryFilter === 'all' || product.category_id === categoryFilter;
@@ -238,34 +238,6 @@ export default function ProductsPage() {
       return;
     }
 
-    const productId = result.data.id as string;
-    const deleteLinks = await supabase.from('product_modifiers').delete().eq('product_id', productId);
-    if (deleteLinks.error) {
-      setMessage({
-        type: 'error',
-        text: `Producto guardado, pero no se pudieron actualizar sus modificadores: ${deleteLinks.error.message}`,
-      });
-      setSaving(false);
-      return;
-    }
-
-    if (productForm.modifierIds.length > 0) {
-      const insertLinks = await supabase.from('product_modifiers').insert(
-        productForm.modifierIds.map((modifierId) => ({
-          product_id: productId,
-          modifier_id: modifierId,
-        }))
-      );
-      if (insertLinks.error) {
-        setMessage({
-          type: 'error',
-          text: `Producto guardado, pero no se pudieron asociar modificadores: ${insertLinks.error.message}`,
-        });
-        setSaving(false);
-        return;
-      }
-    }
-
     setProductForm(null);
     setMessage({ type: 'success', text: 'Producto guardado correctamente.' });
     await loadMenuData();
@@ -284,6 +256,30 @@ export default function ProductsPage() {
       return;
     }
     setMessage({ type: 'success', text: 'Estado del producto actualizado.' });
+    await loadMenuData();
+  }
+
+  async function deleteProduct(product: ProductWithModifiers) {
+    if (!window.confirm(`¿Eliminar permanentemente "${product.name}"? Esta accion no se puede deshacer.`)) return;
+
+    setSaving(true);
+    setMessage(null);
+
+    // First delete modifier links
+    const { error: linkError } = await supabase.from('product_modifiers').delete().eq('product_id', product.id);
+    if (linkError) {
+      setMessage({ type: 'error', text: `No se pudieron eliminar los modificadores asociados: ${linkError.message}` });
+      setSaving(false);
+      return;
+    }
+
+    const { error } = await supabase.from('products').delete().eq('id', product.id);
+    setSaving(false);
+    if (error) {
+      setMessage({ type: 'error', text: `No se pudo eliminar el producto: ${error.message}. Puede que tenga pedidos asociados; en ese caso, desactivalo.` });
+      return;
+    }
+    setMessage({ type: 'success', text: `Producto "${product.name}" eliminado.` });
     await loadMenuData();
   }
 
@@ -331,6 +327,25 @@ export default function ProductsPage() {
     await loadMenuData();
   }
 
+  async function deleteCategory(category: Category) {
+    const associatedProducts = products.filter((product) => product.category_id === category.id);
+    if (associatedProducts.length > 0) {
+      setMessage({ type: 'error', text: `No se puede eliminar "${category.name}" porque tiene ${associatedProducts.length} producto(s) asociado(s). Eliminalos o cambiales la categoria primero.` });
+      return;
+    }
+    if (!window.confirm(`¿Eliminar permanentemente la categoria "${category.name}"?`)) return;
+
+    setSaving(true);
+    const { error } = await supabase.from('categories').delete().eq('id', category.id);
+    setSaving(false);
+    if (error) {
+      setMessage({ type: 'error', text: `No se pudo eliminar la categoria: ${error.message}` });
+      return;
+    }
+    setMessage({ type: 'success', text: `Categoria "${category.name}" eliminada.` });
+    await loadMenuData();
+  }
+
   async function saveModifier(event: FormEvent) {
     event.preventDefault();
     if (!modifierForm) return;
@@ -373,6 +388,27 @@ export default function ProductsPage() {
       return;
     }
     setMessage({ type: 'success', text: 'Estado de modificador actualizado.' });
+    await loadMenuData();
+  }
+
+  async function deleteModifier(modifier: Modifier) {
+    if (!window.confirm(`¿Eliminar permanentemente el modificador "${modifier.name}"?`)) return;
+
+    setSaving(true);
+    // Remove links first
+    const { error: linkError } = await supabase.from('product_modifiers').delete().eq('modifier_id', modifier.id);
+    if (linkError) {
+      setMessage({ type: 'error', text: `No se pudieron eliminar las asociaciones: ${linkError.message}` });
+      setSaving(false);
+      return;
+    }
+    const { error } = await supabase.from('modifiers').delete().eq('id', modifier.id);
+    setSaving(false);
+    if (error) {
+      setMessage({ type: 'error', text: `No se pudo eliminar el modificador: ${error.message}` });
+      return;
+    }
+    setMessage({ type: 'success', text: `Modificador "${modifier.name}" eliminado.` });
     await loadMenuData();
   }
 
@@ -437,6 +473,7 @@ export default function ProductsPage() {
                 showInactive={showInactive}
                 startEditProduct={startEditProduct}
                 toggleProduct={toggleProduct}
+                deleteProduct={deleteProduct}
               />
             )}
 
@@ -447,6 +484,7 @@ export default function ProductsPage() {
                 saving={saving}
                 setCategoryForm={setCategoryForm}
                 toggleCategory={toggleCategory}
+                deleteCategory={deleteCategory}
               />
             )}
 
@@ -456,6 +494,7 @@ export default function ProductsPage() {
                 saving={saving}
                 setModifierForm={setModifierForm}
                 toggleModifier={toggleModifier}
+                deleteModifier={deleteModifier}
               />
             )}
           </>
@@ -464,7 +503,6 @@ export default function ProductsPage() {
 
       {productForm && (
         <ProductEditor
-          activeModifiers={activeModifiers}
           categoryNameById={categoryNameById}
           categories={categories}
           form={productForm}
@@ -510,6 +548,7 @@ function ProductsTable({
   showInactive,
   startEditProduct,
   toggleProduct,
+  deleteProduct,
 }: {
   categories: Category[];
   categoryFilter: string;
@@ -522,6 +561,7 @@ function ProductsTable({
   showInactive: boolean;
   startEditProduct: (product: ProductWithModifiers) => void;
   toggleProduct: (product: ProductWithModifiers) => void;
+  deleteProduct: (product: ProductWithModifiers) => void;
 }) {
   return (
     <section className="space-y-4">
@@ -616,6 +656,14 @@ function ProductsTable({
                     >
                       {product.active ? 'Desactivar' : 'Activar'}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => deleteProduct(product)}
+                      disabled={saving}
+                      className="rounded-lg border border-red-300 px-3 py-2 font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+                    >
+                      Eliminar
+                    </button>
                   </div>
                 </td>
               </tr>
@@ -633,12 +681,14 @@ function CategoriesPanel({
   saving,
   setCategoryForm,
   toggleCategory,
+  deleteCategory,
 }: {
   categories: Category[];
   products: ProductWithModifiers[];
   saving: boolean;
   setCategoryForm: (form: CategoryForm) => void;
   toggleCategory: (category: Category) => void;
+  deleteCategory: (category: Category) => void;
 }) {
   return (
     <section className="space-y-4">
@@ -675,6 +725,14 @@ function CategoriesPanel({
               >
                 {category.active ? 'Desactivar' : 'Activar'}
               </button>
+              <button
+                type="button"
+                onClick={() => deleteCategory(category)}
+                disabled={saving}
+                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Eliminar
+              </button>
             </div>
           </div>
         ))}
@@ -688,11 +746,13 @@ function ModifiersPanel({
   saving,
   setModifierForm,
   toggleModifier,
+  deleteModifier,
 }: {
   modifiers: Modifier[];
   saving: boolean;
   setModifierForm: (form: ModifierForm) => void;
   toggleModifier: (modifier: Modifier) => void;
+  deleteModifier: (modifier: Modifier) => void;
 }) {
   return (
     <section className="space-y-4">
@@ -737,6 +797,14 @@ function ModifiersPanel({
               >
                 {modifier.active ? 'Desactivar' : 'Activar'}
               </button>
+              <button
+                type="button"
+                onClick={() => deleteModifier(modifier)}
+                disabled={saving}
+                className="rounded-lg border border-red-300 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                Eliminar
+              </button>
             </div>
           </div>
         ))}
@@ -746,7 +814,6 @@ function ModifiersPanel({
 }
 
 function ProductEditor({
-  activeModifiers,
   categoryNameById,
   categories,
   form,
@@ -755,7 +822,6 @@ function ProductEditor({
   onCancel,
   onSubmit,
 }: {
-  activeModifiers: Modifier[];
   categoryNameById: Map<string, string>;
   categories: Category[];
   form: ProductForm;
@@ -867,29 +933,7 @@ function ProductEditor({
             />
             Producto activo
           </label>
-          <div>
-            <div className="mb-2 text-sm font-semibold text-gray-700">Modificadores permitidos</div>
-            <div className="grid gap-2 sm:grid-cols-2">
-              {activeModifiers.map((modifier) => (
-                <label key={modifier.id} className="flex items-start gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={form.modifierIds.includes(modifier.id)}
-                    onChange={(event) => {
-                      const modifierIds = event.target.checked
-                        ? [...form.modifierIds, modifier.id]
-                        : form.modifierIds.filter((id) => id !== modifier.id);
-                      setForm({ ...form, modifierIds });
-                    }}
-                  />
-                  <span>
-                    <span className="font-semibold">{modifier.name}</span>
-                    <span className="block text-xs text-gray-500">{formatMoney(modifier.price)}</span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </div>
+
         </div>
 
         <div className="mt-6 flex gap-2">

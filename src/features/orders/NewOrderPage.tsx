@@ -212,6 +212,12 @@ export default function NewOrderPage() {
             : 'Sin categoria',
         }))
     );
+
+    // Auto-select the first category (Hamburguesas) instead of 'all'
+    if (categoryRows.length > 0) {
+      setSelectedCategory(categoryRows[0].id);
+    }
+
     setLoading(false);
   }
 
@@ -424,17 +430,6 @@ export default function NewOrderPage() {
               <span>Elegí una categoría</span>
             </div>
             <div className="new-order-filters">
-              <button
-                type="button"
-                onClick={() => setSelectedCategory('all')}
-                className={`new-order-filter ${
-                  selectedCategory === 'all'
-                    ? 'bg-red-700 text-white'
-                    : 'bg-white text-gray-700 border border-red-100 hover:border-red-300'
-                }`}
-              >
-                Todos
-              </button>
               {categories.map((category) => (
                 <button
                   key={category.id}
@@ -449,6 +444,17 @@ export default function NewOrderPage() {
                   {category.name}
                 </button>
               ))}
+              <button
+                type="button"
+                onClick={() => setSelectedCategory('all')}
+                className={`new-order-filter ${
+                  selectedCategory === 'all'
+                    ? 'bg-red-700 text-white'
+                    : 'bg-white text-gray-700 border border-red-100 hover:border-red-300'
+                }`}
+              >
+                Todos
+              </button>
             </div>
 
             <div className="new-order-products">

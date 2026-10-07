@@ -16,7 +16,7 @@ export default function AppLayout() {
   return (
     <div className="perez-shell flex min-h-screen flex-col">
       <header className="brand-header sticky top-0 z-30 px-3 py-2 sm:px-4 sm:py-3 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4">
+        <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
           <div className="flex min-w-0 items-center gap-5">
             <span className="brand-mark grid h-11 w-24 shrink-0 place-items-center sm:h-12 sm:w-28">
                 <img
@@ -76,7 +76,7 @@ export default function AppLayout() {
         ))}
       </nav>
 
-      <main className="mx-auto w-full max-w-7xl flex-1 p-3 sm:p-4">
+      <main className="mx-auto w-full max-w-[1600px] flex-1 p-3 sm:p-4">
         <Outlet />
       </main>
     </div>

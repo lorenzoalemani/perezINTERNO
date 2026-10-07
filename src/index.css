@@ -645,6 +645,28 @@ textarea:focus {
   }
 }
 
+/* ---------- Ultra-wide / wide monitors ---------- */
+
+@media (min-width: 1600px) {
+  .new-order-products {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .new-order-layout {
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+}
+
+@media (min-width: 1920px) {
+  .new-order-products {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .new-order-layout {
+    grid-template-columns: minmax(0, 1fr) 460px;
+  }
+}
+
 .print-ticket {
   display: none;
 }

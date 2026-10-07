@@ -268,13 +268,18 @@ export default function ProductsPage() {
     await supabase.from('product_modifiers').delete().eq('product_id', product.id);
 
     // Nullify product_id in order_items so delete doesn't fail on FK constraint
-    // (order history still has product_name_snapshot)
-    await supabase.from('order_items').update({ product_id: null }).eq('product_id', product.id);
+    const { error: unlinkError } = await supabase.from('order_items').update({ product_id: null }).eq('product_id', product.id);
+    if (unlinkError) {
+      console.warn('Could not nullify order_items product_id directly:', unlinkError);
+    }
 
     const { error } = await supabase.from('products').delete().eq('id', product.id);
     setSaving(false);
     if (error) {
-      setMessage({ type: 'error', text: `No se pudo eliminar el producto: ${error.message}` });
+      setMessage({
+        type: 'error',
+        text: `No se pudo eliminar el producto: ${error.message}. Si tiene pedidos históricos asociados, corre la migración SQL en Supabase para habilitar ON DELETE SET NULL.`,
+      });
       return;
     }
     setMessage({ type: 'success', text: `Producto "${product.name}" eliminado.` });

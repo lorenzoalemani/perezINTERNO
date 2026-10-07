@@ -112,7 +112,7 @@ export default function CashPage() {
 
     const range = dayRange(businessDate);
     const [registerResult, paymentsResult] = await Promise.all([
-      supabase.from('cash_registers').select('*').eq('business_date', businessDate).maybeSingle(),
+      supabase.from('cash_registers').select('*').eq('business_date', businessDate).order('created_at', { ascending: false }),
       supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
     ]);
 
@@ -122,7 +122,9 @@ export default function CashPage() {
       return;
     }
 
-    const currentRegister = (registerResult.data as CashRegister | null) ?? null;
+    const registers = (registerResult.data as CashRegister[] | null) ?? [];
+    const openRegister = registers.find((r) => !r.closed_at);
+    const currentRegister = openRegister ?? (registers.length > 0 ? registers[0] : null);
     setRegister(currentRegister);
     setPayments((paymentsResult.data ?? []) as Payment[]);
 
@@ -173,6 +175,9 @@ export default function CashPage() {
     setHistory(summaries);
   }
 
+  const [editingRegister, setEditingRegister] = useState<RegisterSummary | null>(null);
+  const [editClosingAmount, setEditClosingAmount] = useState('');
+
   async function openRegister(event: FormEvent) {
     event.preventDefault();
     if (!profile) {
@@ -195,12 +200,75 @@ export default function CashPage() {
     setSaving(false);
 
     if (error) {
-      setMessage({ type: 'error', text: 'No se pudo abrir la caja. Verifica si ya existe caja para hoy.' });
+      setMessage({ type: 'error', text: `No se pudo abrir la caja: ${error.message}` });
       return;
     }
 
     setOpeningAmount('');
     setMessage({ type: 'success', text: 'Caja abierta correctamente.' });
+    await loadCashData();
+  }
+
+  async function deleteRegister(reg: CashRegister) {
+    if (!window.confirm(`¿Seguro que deseas eliminar la caja del ${formatDate(reg.business_date)}? Esta acción eliminará también sus movimientos asociados.`)) {
+      return;
+    }
+
+    setSaving(true);
+    setMessage(null);
+
+    // Delete movements first
+    await supabase.from('cash_movements').delete().eq('register_id', reg.id);
+
+    const { error } = await supabase.from('cash_registers').delete().eq('id', reg.id);
+    setSaving(false);
+
+    if (error) {
+      setMessage({ type: 'error', text: `No se pudo eliminar la caja: ${error.message}` });
+      return;
+    }
+
+    setMessage({ type: 'success', text: 'Caja eliminada correctamente.' });
+    await loadCashData();
+  }
+
+  function startEditRegister(summaryItem: RegisterSummary) {
+    setEditingRegister(summaryItem);
+    setEditClosingAmount(
+      summaryItem.register.closing_amount !== null ? String(summaryItem.register.closing_amount) : ''
+    );
+  }
+
+  async function saveEditRegister(event: FormEvent) {
+    event.preventDefault();
+    if (!editingRegister) return;
+
+    const counted = parseAmount(editClosingAmount);
+    if (!Number.isFinite(counted) || counted < 0) {
+      setMessage({ type: 'error', text: 'Ingresa un monto contado valido.' });
+      return;
+    }
+
+    const difference = counted - editingRegister.expectedCash;
+
+    setSaving(true);
+    const { error } = await supabase
+      .from('cash_registers')
+      .update({
+        closing_amount: counted,
+        closing_difference_amount: difference,
+      })
+      .eq('id', editingRegister.register.id);
+
+    setSaving(false);
+
+    if (error) {
+      setMessage({ type: 'error', text: `No se pudo actualizar la caja: ${error.message}` });
+      return;
+    }
+
+    setEditingRegister(null);
+    setMessage({ type: 'success', text: 'Caja actualizada correctamente.' });
     await loadCashData();
   }
 
@@ -342,11 +410,15 @@ export default function CashPage() {
 
       {loading ? (
         <div className="card py-12 text-center text-gray-500">Cargando caja...</div>
-      ) : !register ? (
+      ) : !register || register.closed_at ? (
         <form onSubmit={openRegister} className="card max-w-xl space-y-4">
           <div>
             <h2 className="text-xl font-bold">Abrir caja</h2>
-            <p className="text-sm text-gray-500">Registra el efectivo inicial. No cuenta como venta.</p>
+            <p className="text-sm text-gray-500">
+              {register?.closed_at
+                ? 'La caja anterior fue cerrada. Podes abrir una nueva.'
+                : 'Registra el efectivo inicial. No cuenta como venta.'}
+            </p>
           </div>
           <label className="block">
             <span className="text-sm font-semibold text-gray-700">Monto inicial</span>
@@ -536,6 +608,7 @@ export default function CashPage() {
                   <th className="px-3 py-3">Contado</th>
                   <th className="px-3 py-3">Diferencia</th>
                   <th className="px-3 py-3">Estado</th>
+                  <th className="px-3 py-3 text-right">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -557,6 +630,26 @@ export default function CashPage() {
                         : formatMoney(Number(item.register.closing_difference_amount))}
                     </td>
                     <td className="px-3 py-3">{item.register.closed_at ? 'Cerrada' : 'Abierta'}</td>
+                    <td className="px-3 py-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        {item.register.closed_at && (
+                          <button
+                            type="button"
+                            onClick={() => startEditRegister(item)}
+                            className="rounded border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
+                          >
+                            Editar
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => deleteRegister(item.register)}
+                          className="rounded border border-red-200 px-2 py-1 text-xs font-semibold text-red-600 hover:bg-red-50"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -564,6 +657,68 @@ export default function CashPage() {
           </div>
         )}
       </section>
+
+      {editingRegister && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <h3 className="text-lg font-bold text-gray-900">
+              Editar caja del {formatDate(editingRegister.register.business_date)}
+            </h3>
+            <p className="mt-1 text-sm text-gray-500">
+              Efectivo esperado por el sistema: {formatMoney(editingRegister.expectedCash)}
+            </p>
+
+            <form onSubmit={saveEditRegister} className="mt-4 space-y-4">
+              <div>
+                <label className="block text-sm font-semibold text-gray-700">
+                  Efectivo contado al cierre
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={editClosingAmount}
+                  onChange={(e) => setEditClosingAmount(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-lg font-bold"
+                  placeholder="0"
+                  autoFocus
+                />
+              </div>
+
+              {Number.isFinite(parseAmount(editClosingAmount)) && (
+                <div className="rounded-lg bg-gray-50 p-3 text-sm">
+                  <span className="text-gray-500">Nueva diferencia estimada: </span>
+                  <span
+                    className={`font-bold ${
+                      parseAmount(editClosingAmount) - editingRegister.expectedCash < 0
+                        ? 'text-red-600'
+                        : 'text-green-600'
+                    }`}
+                  >
+                    {formatMoney(parseAmount(editClosingAmount) - editingRegister.expectedCash)}
+                  </span>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingRegister(null)}
+                  className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-bold text-gray-700 hover:bg-gray-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="rounded-lg bg-red-700 px-4 py-2 text-sm font-bold text-white hover:bg-red-800 disabled:opacity-50"
+                >
+                  {saving ? 'Guardando...' : 'Guardar cambios'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

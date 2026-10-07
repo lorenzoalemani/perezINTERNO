@@ -264,18 +264,17 @@ export default function ProductsPage() {
     setSaving(true);
     setMessage(null);
 
-    // First delete modifier links
-    const { error: linkError } = await supabase.from('product_modifiers').delete().eq('product_id', product.id);
-    if (linkError) {
-      setMessage({ type: 'error', text: `No se pudieron eliminar los modificadores asociados: ${linkError.message}` });
-      setSaving(false);
-      return;
-    }
+    // Remove modifier links
+    await supabase.from('product_modifiers').delete().eq('product_id', product.id);
+
+    // Nullify product_id in order_items so delete doesn't fail on FK constraint
+    // (order history still has product_name_snapshot)
+    await supabase.from('order_items').update({ product_id: null }).eq('product_id', product.id);
 
     const { error } = await supabase.from('products').delete().eq('id', product.id);
     setSaving(false);
     if (error) {
-      setMessage({ type: 'error', text: `No se pudo eliminar el producto: ${error.message}. Puede que tenga pedidos asociados; en ese caso, desactivalo.` });
+      setMessage({ type: 'error', text: `No se pudo eliminar el producto: ${error.message}` });
       return;
     }
     setMessage({ type: 'success', text: `Producto "${product.name}" eliminado.` });

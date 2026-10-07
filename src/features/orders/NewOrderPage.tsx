@@ -369,7 +369,7 @@ export default function NewOrderPage() {
     if (error || !data) {
       setMessage({
         type: 'error',
-        text: 'No se pudo guardar el pedido. Verifica la sesion e intenta nuevamente.',
+        text: `No se pudo guardar el pedido: ${error?.message ?? 'Respuesta vacía del servidor'}.`,
       });
       return;
     }

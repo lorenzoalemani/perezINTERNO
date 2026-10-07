@@ -222,7 +222,6 @@ export default function ProductsPage() {
       variant_prices: isBurger
         ? { Simple: simplePrice, Doble: doublePrice, Triple: triplePrice }
         : {},
-      description: productForm.description.trim() || null,
       active: productForm.active,
     };
     const result = productForm.id
@@ -917,14 +916,7 @@ function ProductEditor({
               />
             </label>
           )}
-          <label className="block">
-            <span className="text-sm font-semibold text-gray-700">Descripcion opcional</span>
-            <textarea
-              value={form.description}
-              onChange={(event) => setForm({ ...form, description: event.target.value })}
-              className="mt-1 min-h-24 w-full rounded-lg border border-gray-300 px-3 py-2"
-            />
-          </label>
+
           <label className="flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2">
             <input
               type="checkbox"

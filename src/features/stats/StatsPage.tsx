@@ -29,8 +29,9 @@ export default function StatsPage() {
     setErrorMessage(null);
     try {
       setStats(await loadBusinessStats(period, { includeCash: isAdmin }));
-    } catch {
-      setErrorMessage('No se pudieron cargar las estadisticas.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido';
+      setErrorMessage(`No se pudieron cargar las estadisticas: ${message}`);
     } finally {
       setLoading(false);
     }

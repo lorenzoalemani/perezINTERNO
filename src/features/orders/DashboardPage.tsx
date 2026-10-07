@@ -103,8 +103,9 @@ export default function DashboardPage() {
       ]);
       setStats(businessStats);
       setTodayOrders(ordersData.today);
-    } catch {
-      setErrorMessage('No se pudieron cargar las metricas del dashboard.');
+    } catch (err) {
+      const message = err instanceof Error ? err.message : (err as { message?: string })?.message ?? 'Error desconocido';
+      setErrorMessage(`No se pudieron cargar las metricas del dashboard: ${message}`);
     } finally {
       setLoading(false);
     }

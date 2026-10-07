@@ -212,8 +212,8 @@ export async function loadBusinessStats(
         .select('*', { count: 'exact', head: true })
         .in('status', ['pending', 'preparing', 'ready']),
       includeCash
-        ? supabase.from('cash_registers').select('*').eq('business_date', today).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
+        ? supabase.from('cash_registers').select('*').eq('business_date', today).order('opened_at', { ascending: false })
+        : Promise.resolve({ data: [], error: null }),
       includeCash
         ? supabase.from('payments').select('*').gte('created_at', todayRange.from).lt('created_at', todayRange.to)
         : Promise.resolve({ data: [], error: null }),
@@ -230,7 +230,9 @@ export async function loadBusinessStats(
     throw firstError;
   }
 
-  const register = (registerResult.data as CashRegister | null) ?? null;
+  const registers = (registerResult.data as CashRegister[] | null) ?? [];
+  const openRegister = registers.find((r) => !r.closed_at);
+  const register = openRegister ?? (registers.length > 0 ? registers[0] : null);
   let todayMovements: CashMovement[] = [];
   if (includeCash && register) {
     const { data, error } = await supabase

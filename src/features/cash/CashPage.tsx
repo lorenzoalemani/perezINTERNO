@@ -112,12 +112,13 @@ export default function CashPage() {
 
     const range = dayRange(businessDate);
     const [registerResult, paymentsResult] = await Promise.all([
-      supabase.from('cash_registers').select('*').eq('business_date', businessDate).order('created_at', { ascending: false }),
+      supabase.from('cash_registers').select('*').eq('business_date', businessDate).order('opened_at', { ascending: false }),
       supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
     ]);
 
     if (registerResult.error || paymentsResult.error) {
-      setMessage({ type: 'error', text: 'No se pudo cargar la caja del dia.' });
+      const err = registerResult.error ?? paymentsResult.error;
+      setMessage({ type: 'error', text: `No se pudo cargar la caja del dia: ${err?.message}` });
       setLoading(false);
       return;
     }

@@ -92,7 +92,7 @@ function isCategory(product: ProductWithCategory, categoryName: string) {
 
 function requiresProductConfig(product: ProductWithCategory) {
   const name = normalizeText(product.name);
-  return isCategory(product, 'HAMBURGUESAS') || name.includes('PAPAS') || name.includes('BONIATOS');
+  return isCategory(product, 'HAMBURGUESAS') || name.includes('PAPAS') || name.includes('BONIATOS') || name.includes('NUGGET') || name.includes('ARO');
 }
 
 function defaultItemConfig(product: ProductWithCategory): OrderItemConfig {
@@ -699,6 +699,7 @@ function ProductConfigModal({
   const isExtra = isCategory(product, 'EXTRAS');
   const productName = normalizeText(product.name);
   const needsSeasoning = productName.includes('PAPAS') || productName.includes('BONIATOS');
+  const needsDip = productName.includes('BONIATOS') || productName.includes('NUGGET') || productName.includes('ARO');
   const baseMeatsBySize = { Simple: 1, Doble: 2, Triple: 3 };
   const totalMeats = isBurger && protein === 'carne' ? baseMeatsBySize[meatSize] + extraMeats : 0;
 
@@ -720,7 +721,7 @@ function ProductConfigModal({
       const itemConfig: OrderItemConfig = {
         kind: 'extra',
         ...(needsSeasoning ? { seasoning } : {}),
-        dip: dip || null,
+        ...(needsDip ? { dip: dip || null } : {}),
       };
       onConfirm(itemConfig, null, 0);
     }
@@ -829,7 +830,7 @@ function ProductConfigModal({
               <section>
                 <h3 className="mb-2 text-xs font-bold uppercase text-gray-500">Sazon</h3>
                 <div className="grid grid-cols-2 gap-2">
-                  {(['Sin sazon', productName === 'PAPAS' ? 'Sazonadas' : 'Sazonados'] as const).map((option) => (
+                  {(['Sin sazon', productName.includes('PAPAS') ? 'Sazonadas' : 'Sazonados'] as const).map((option) => (
                     <button
                       key={option}
                       type="button"
@@ -845,6 +846,7 @@ function ProductConfigModal({
               </section>
             )}
 
+            {needsDip && (
             <section>
               <h3 className="mb-2 text-xs font-bold uppercase text-gray-500">Dip opcional</h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -862,6 +864,7 @@ function ProductConfigModal({
                 ))}
               </div>
             </section>
+            )}
           </div>
         )}
 

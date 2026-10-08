@@ -5,7 +5,6 @@ import { useAuth } from '../auth/AuthContext';
 import PaymentModal from './PaymentModal';
 import {
   formatMoney,
-  getLocalBusinessDate,
   loadBusinessStats,
   type BusinessStats,
 } from '../stats/statsService';
@@ -35,6 +34,7 @@ export default function DashboardPage() {
   const [chargeOrder, setChargeOrder] = useState<OrderWithItems | null>(null);
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
   const isPrintingRef = useRef(false);
+  const [hasOpenRegister, setHasOpenRegister] = useState<boolean>(true);
   const [clearedBefore, setClearedBefore] = useState<string | null>(() => {
     try {
       const stored = localStorage.getItem('scheduleClearedTimestamp');
@@ -115,24 +115,32 @@ export default function DashboardPage() {
   }
 
   async function loadDashboardOrders() {
-    // 1. Obtener la caja abierta del día
-    const today = getLocalBusinessDate();
+    // 1. Obtener la caja abierta
     const { data: registers } = await supabase
       .from('cash_registers')
       .select('*')
-      .eq('business_date', today)
-      .order('opened_at', { ascending: false });
+      .order('opened_at', { ascending: false })
+      .limit(20);
 
     const openRegister = (registers as CashRegister[] | null)?.find((r) => !r.closed_at);
+    setHasOpenRegister(Boolean(openRegister));
 
-    // Si no hay caja abierta hoy (está cerrada o nunca se abrió), no hay pedidos operativos activos
+    // Si no hay caja abierta (está cerrada o nunca se abrió), no hay pedidos operativos activos en el dashboard
     if (!openRegister) {
       return {
         today: [] as OrderWithItems[],
       };
     }
 
-    // Si hay caja abierta, cargar los pedidos realizados desde la apertura de dicha caja
+    // Si hay caja abierta y se había limpiado antes de que abra esta caja, reiniciar el estado de limpieza
+    if (clearedBefore && new Date(clearedBefore).getTime() < new Date(openRegister.opened_at).getTime()) {
+      setClearedBefore(null);
+      try {
+        localStorage.removeItem('scheduleClearedTimestamp');
+      } catch { /* ignore */ }
+    }
+
+    // Cargar únicamente los pedidos realizados desde la apertura de dicha caja abierta
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*, order_item_modifiers(*)), payments(*)')
@@ -193,13 +201,41 @@ export default function DashboardPage() {
   return (
     <div className="space-y-4 sm:space-y-6">
       <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_220px]">
-        <button onClick={() => navigate('/pedidos/nuevo')} className="btn-primary w-full py-5 text-lg sm:py-6 sm:text-xl">
+        <button
+          onClick={() => {
+            if (!hasOpenRegister) {
+              alert('No hay una caja abierta actualmente. Primero debes abrir una caja para poder cargar pedidos.');
+              navigate('/caja');
+              return;
+            }
+            navigate('/pedidos/nuevo');
+          }}
+          className="btn-primary w-full py-5 text-lg sm:py-6 sm:text-xl"
+        >
           + NUEVO PEDIDO
         </button>
         <button type="button" onClick={loadStats} className="btn-secondary w-full px-4 py-4 text-base">
           Actualizar
         </button>
       </div>
+
+      {!hasOpenRegister && (
+        <div className="flex flex-col gap-3 rounded-xl border-2 border-red-300 bg-red-50 p-4 sm:flex-row sm:items-center sm:justify-between text-red-900">
+          <div>
+            <p className="font-black text-base">⚠️ La caja se encuentra cerrada</p>
+            <p className="text-sm font-semibold text-red-700">
+              Para poder cargar pedidos y operar, primero debes abrir una caja en la sección de Caja.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => navigate('/caja')}
+            className="rounded-lg bg-red-700 px-4 py-2 font-black text-white hover:bg-red-800 shrink-0 text-sm"
+          >
+            Ir a abrir caja
+          </button>
+        </div>
+      )}
 
       {errorMessage && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
@@ -231,24 +267,25 @@ export default function DashboardPage() {
                   type="button"
                   onClick={() => {
                     if (clearedBefore) {
-                      if (!window.confirm('¿Estás seguro de que deseas restaurar los pedidos ocultos a la planilla?')) {
+                      if (!window.confirm('¿Estás seguro de que deseas restaurar los pedidos al dashboard?')) {
                         return;
                       }
-                    }
-                    const newTimestamp = clearedBefore ? null : new Date().toISOString();
-                    setClearedBefore(newTimestamp);
-                    try {
-                      if (newTimestamp) {
-                        localStorage.setItem('scheduleClearedTimestamp', newTimestamp);
-                      } else {
+                      setClearedBefore(null);
+                      try {
                         localStorage.removeItem('scheduleClearedTimestamp');
+                      } catch { /* ignore */ }
+                      setMessage('Los pedidos volvieron a mostrarse en la planilla.');
+                    } else {
+                      if (!window.confirm('¿Estás seguro de que deseas limpiar todos los pedidos del dashboard?')) {
+                        return;
                       }
-                    } catch { /* ignore */ }
-                    setMessage(
-                      newTimestamp
-                        ? 'Los pedidos existentes fueron limpiados de la planilla. Los nuevos pedidos aparecerán normalmente.'
-                        : 'Los pedidos volvieron a mostrarse en la planilla.'
-                    );
+                      const newTimestamp = new Date().toISOString();
+                      setClearedBefore(newTimestamp);
+                      try {
+                        localStorage.setItem('scheduleClearedTimestamp', newTimestamp);
+                      } catch { /* ignore */ }
+                      setMessage('Los pedidos existentes fueron limpiados del dashboard.');
+                    }
                   }}
                   className="min-h-11 rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-black text-gray-700 hover:border-red-300 hover:text-red-800"
                 >
@@ -276,7 +313,14 @@ export default function DashboardPage() {
                 canViewMoney={isAdmin}
                 onCancel={cancelOrder}
                 onCharge={setChargeOrder}
-                onNewOrder={(time) => navigate(`/pedidos/nuevo?pickup=${encodeURIComponent(time)}`)}
+                onNewOrder={(time) => {
+                  if (!hasOpenRegister) {
+                    alert('No hay una caja abierta actualmente. Primero debes abrir una caja para poder cargar pedidos.');
+                    navigate('/caja');
+                    return;
+                  }
+                  navigate(`/pedidos/nuevo?pickup=${encodeURIComponent(time)}`);
+                }}
                 onPrint={printTicket}
                 onUpdateStatus={updateStatus}
               />

@@ -171,6 +171,7 @@ export default function NewOrderPage() {
   const [selectedModifierIds, setSelectedModifierIds] = useState<string[]>([]);
   const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [hasOpenRegister, setHasOpenRegister] = useState<boolean | null>(null);
 
   useEffect(() => {
     loadOrderData();
@@ -180,12 +181,16 @@ export default function NewOrderPage() {
     setLoading(true);
     setMessage(null);
 
-    const [categoriesResult, productsResult, modifiersResult, linksResult] = await Promise.all([
+    const [categoriesResult, productsResult, modifiersResult, linksResult, registerResult] = await Promise.all([
       supabase.from('categories').select('*').eq('active', true).order('sort_order').order('name'),
       supabase.from('products').select('*').eq('active', true).order('sort_order').order('name'),
       supabase.from('modifiers').select('*').eq('active', true).order('name'),
       supabase.from('product_modifiers').select('product_id, modifier_id'),
+      supabase.from('cash_registers').select('id, opened_at, closed_at').is('closed_at', null).order('opened_at', { ascending: false }).limit(1),
     ]);
+
+    const openRegs = (registerResult.data as { id: string }[] | null) ?? [];
+    setHasOpenRegister(openRegs.length > 0);
 
     const error = categoriesResult.error ?? productsResult.error ?? modifiersResult.error ?? linksResult.error;
     if (error) {
@@ -341,6 +346,23 @@ export default function NewOrderPage() {
     setSaving(true);
     setMessage(null);
 
+    // Validar que exista una caja abierta antes de guardar
+    const { data: openRegisters } = await supabase
+      .from('cash_registers')
+      .select('id')
+      .is('closed_at', null)
+      .limit(1);
+
+    if (!openRegisters || openRegisters.length === 0) {
+      setHasOpenRegister(false);
+      setSaving(false);
+      setMessage({
+        type: 'error',
+        text: 'No se puede cargar el pedido: no hay ninguna caja abierta. Primero debes abrir una caja.',
+      });
+      return;
+    }
+
     const payload: NewOrderItemPayload[] = cart.map((item) => ({
       product_id: item.product.id,
       product_name: item.product.name,
@@ -422,6 +444,30 @@ export default function NewOrderPage() {
 
       {loading ? (
         <div className="card py-12 text-center text-gray-500">Cargando menu...</div>
+      ) : hasOpenRegister === false ? (
+        <div className="card max-w-xl mx-auto py-12 px-6 text-center space-y-5 border-2 border-red-300 bg-red-50">
+          <div className="text-5xl">⚠️</div>
+          <h2 className="text-2xl font-black text-red-950">No hay ninguna caja abierta</h2>
+          <p className="text-base font-semibold text-red-800">
+            Para poder cargar pedidos primero debes abrir una caja en la sección de Caja.
+          </p>
+          <div className="flex flex-col sm:flex-row justify-center gap-3 pt-3">
+            <button
+              type="button"
+              onClick={() => navigate('/caja')}
+              className="btn-primary px-6 py-3 text-base"
+            >
+              Ir a abrir caja
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/')}
+              className="btn-secondary px-6 py-3 text-base"
+            >
+              Volver al dashboard
+            </button>
+          </div>
+        </div>
       ) : (
         <div className="new-order-layout">
           <section className="new-order-menu">

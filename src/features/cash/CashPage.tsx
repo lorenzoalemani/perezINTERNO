@@ -127,7 +127,19 @@ export default function CashPage() {
     const openRegister = registers.find((r) => !r.closed_at);
     const currentRegister = openRegister ?? (registers.length > 0 ? registers[0] : null);
     setRegister(currentRegister);
-    setPayments((paymentsResult.data ?? []) as Payment[]);
+
+    const allPayments = (paymentsResult.data ?? []) as Payment[];
+    if (currentRegister) {
+      const regOpenTime = new Date(currentRegister.opened_at).getTime();
+      const regCloseTime = currentRegister.closed_at ? new Date(currentRegister.closed_at).getTime() : Infinity;
+      const currentPayments = allPayments.filter((p) => {
+        const pTime = new Date(p.created_at).getTime();
+        return pTime >= regOpenTime && pTime <= regCloseTime;
+      });
+      setPayments(currentPayments);
+    } else {
+      setPayments([]);
+    }
 
     if (currentRegister) {
       const { data, error } = await supabase
@@ -153,7 +165,7 @@ export default function CashPage() {
     const { data, error } = await supabase
       .from('cash_registers')
       .select('*')
-      .order('business_date', { ascending: false })
+      .order('opened_at', { ascending: false })
       .limit(20);
 
     if (error) return;
@@ -161,9 +173,14 @@ export default function CashPage() {
     const registers = (data ?? []) as CashRegister[];
     const summaries = await Promise.all(
       registers.map(async (cashRegister) => {
-        const range = dayRange(cashRegister.business_date);
+        const regOpen = cashRegister.opened_at;
+        const regClose = cashRegister.closed_at || new Date().toISOString();
         const [paymentsResult, movementsResult] = await Promise.all([
-          supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
+          supabase
+            .from('payments')
+            .select('*')
+            .gte('created_at', regOpen)
+            .lte('created_at', regClose),
           supabase.from('cash_movements').select('*').eq('register_id', cashRegister.id),
         ]);
         return calculateSummary(

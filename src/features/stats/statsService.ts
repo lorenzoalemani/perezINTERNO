@@ -212,7 +212,7 @@ export async function loadBusinessStats(
         .select('*', { count: 'exact', head: true })
         .in('status', ['pending', 'preparing', 'ready']),
       includeCash
-        ? supabase.from('cash_registers').select('*').eq('business_date', today).order('opened_at', { ascending: false })
+        ? supabase.from('cash_registers').select('*').order('opened_at', { ascending: false }).limit(20)
         : Promise.resolve({ data: [], error: null }),
       includeCash
         ? supabase.from('payments').select('*').gte('created_at', todayRange.from).lt('created_at', todayRange.to)
@@ -230,7 +230,7 @@ export async function loadBusinessStats(
     throw firstError;
   }
 
-    const registers = (registerResult.data as CashRegister[] | null) ?? [];
+  const registers = (registerResult.data as CashRegister[] | null) ?? [];
   const openRegister = registers.find((r) => !r.closed_at);
   const register = openRegister ?? null;
   let todayMovements: CashMovement[] = [];
@@ -317,7 +317,10 @@ export async function loadBusinessStats(
     salesTotal,
     validOrderCount,
     averageTicket,
-    activeOrderCount: activeCountResult.count ?? 0,
+    activeOrderCount:
+      periodKey === 'today'
+        ? (!openRegister ? 0 : orders.filter((o) => ['pending', 'preparing', 'ready'].includes(o.status)).length)
+        : (activeCountResult.count ?? 0),
     cashTotal,
     transferTotal,
     cashPercent: paymentTotal > 0 ? (cashTotal / paymentTotal) * 100 : 0,
@@ -336,8 +339,18 @@ export async function loadBusinessStats(
     statusCounts,
     cancelledCount,
     cancellationPercent,
-    cashSummary: includeCash
-      ? calculateCashSummary(register, (todayPaymentsResult.data ?? []) as Payment[], todayMovements)
-      : null,
+    cashSummary:
+      includeCash && register
+        ? calculateCashSummary(
+            register,
+            ((todayPaymentsResult.data ?? []) as Payment[]).filter((p) => {
+              const pTime = new Date(p.created_at).getTime();
+              const regOpen = new Date(register.opened_at).getTime();
+              const regClose = register.closed_at ? new Date(register.closed_at).getTime() : Infinity;
+              return pTime >= regOpen && pTime <= regClose;
+            }),
+            todayMovements
+          )
+        : null,
   };
 }

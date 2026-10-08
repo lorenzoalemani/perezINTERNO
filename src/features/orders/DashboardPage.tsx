@@ -5,7 +5,7 @@ import { useAuth } from '../auth/AuthContext';
 import PaymentModal from './PaymentModal';
 import {
   formatMoney,
-  getPeriodRange,
+  getLocalBusinessDate,
   loadBusinessStats,
   type BusinessStats,
 } from '../stats/statsService';
@@ -17,7 +17,7 @@ import {
   StatusBadge,
   statusLabels,
 } from './orderHelpers';
-import type { OrderItemConfig } from '../../types/database';
+import type { CashRegister, OrderItemConfig } from '../../types/database';
 import { BURGER_CAPACITY_PER_SLOT, PICKUP_TIME_OPTIONS } from './orderSchedule';
 
 
@@ -66,6 +66,10 @@ export default function DashboardPage() {
   const operativeOrders = useMemo(() => {
     const byId = new Map<string, OrderWithItems>();
     for (const order of todayOrders) {
+      // Disappear completely if cancelled
+      if (order.status === 'cancelled') {
+        continue;
+      }
       // If a cleanup was performed, hide orders created prior to the cleanup timestamp
       if (clearedBefore && new Date(order.created_at).getTime() <= new Date(clearedBefore).getTime()) {
         continue;
@@ -111,15 +115,28 @@ export default function DashboardPage() {
   }
 
   async function loadDashboardOrders() {
-    // La planilla operativa debe usar la misma definicion de "hoy" que las
-    // tarjetas del Dashboard. De este modo un pedido creado hoy nunca queda
-    // en Pendientes sin aparecer tambien en su horario.
-    const period = getPeriodRange('today');
+    // 1. Obtener la caja abierta del día
+    const today = getLocalBusinessDate();
+    const { data: registers } = await supabase
+      .from('cash_registers')
+      .select('*')
+      .eq('business_date', today)
+      .order('opened_at', { ascending: false });
+
+    const openRegister = (registers as CashRegister[] | null)?.find((r) => !r.closed_at);
+
+    // Si no hay caja abierta hoy (está cerrada o nunca se abrió), no hay pedidos operativos activos
+    if (!openRegister) {
+      return {
+        today: [] as OrderWithItems[],
+      };
+    }
+
+    // Si hay caja abierta, cargar los pedidos realizados desde la apertura de dicha caja
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*, order_item_modifiers(*)), payments(*)')
-      .gte('created_at', period.from)
-      .lt('created_at', period.to)
+      .gte('created_at', openRegister.opened_at)
       .order('pickup_time', { ascending: true })
       .limit(500);
 
@@ -213,6 +230,11 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   onClick={() => {
+                    if (clearedBefore) {
+                      if (!window.confirm('¿Estás seguro de que deseas restaurar los pedidos ocultos a la planilla?')) {
+                        return;
+                      }
+                    }
                     const newTimestamp = clearedBefore ? null : new Date().toISOString();
                     setClearedBefore(newTimestamp);
                     try {

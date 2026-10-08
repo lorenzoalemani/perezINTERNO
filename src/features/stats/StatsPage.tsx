@@ -15,7 +15,7 @@ import {
 export default function StatsPage() {
   const { profile } = useAuth();
   const isAdmin = profile?.role === 'admin';
-  const [period, setPeriod] = useState<PeriodKey>('last7');
+  const [period, setPeriod] = useState<PeriodKey>('today');
   const [stats, setStats] = useState<BusinessStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

@@ -230,9 +230,9 @@ export async function loadBusinessStats(
     throw firstError;
   }
 
-  const registers = (registerResult.data as CashRegister[] | null) ?? [];
+    const registers = (registerResult.data as CashRegister[] | null) ?? [];
   const openRegister = registers.find((r) => !r.closed_at);
-  const register = openRegister ?? (registers.length > 0 ? registers[0] : null);
+  const register = openRegister ?? null;
   let todayMovements: CashMovement[] = [];
   if (includeCash && register) {
     const { data, error } = await supabase
@@ -243,8 +243,23 @@ export async function loadBusinessStats(
     todayMovements = (data ?? []) as CashMovement[];
   }
 
-  const orders = (ordersResult.data ?? []) as OrderWithItems[];
-  const payments = (paymentsResult.data ?? []) as Payment[];
+  let orders = (ordersResult.data ?? []) as OrderWithItems[];
+  let payments = (paymentsResult.data ?? []) as Payment[];
+
+  // Cuando se consulta el día actual ('today'):
+  // Si la caja está cerrada (o no se abrió), todo debe reiniciar a 0.
+  // Si está abierta, se toman sólo las operaciones desde que se abrió esa caja.
+  if (periodKey === 'today') {
+    if (!openRegister) {
+      orders = [];
+      payments = [];
+    } else {
+      const openedAtTime = new Date(openRegister.opened_at).getTime();
+      orders = orders.filter((order) => new Date(order.created_at).getTime() >= openedAtTime);
+      payments = payments.filter((payment) => new Date(payment.created_at).getTime() >= openedAtTime);
+    }
+  }
+
   const validOrders = orders.filter((order) => order.status !== 'cancelled' && order.payment_status === 'paid');
   const salesTotal = validOrders.reduce((sum, order) => sum + Number(order.total), 0);
   const validOrderCount = validOrders.length;

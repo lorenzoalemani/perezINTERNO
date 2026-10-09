@@ -341,7 +341,7 @@ export function PrintableOrderTicket({ order }: { order: OrderWithItems | null }
         <div className="print-ticket-items">
           {order.order_items.map((item) => (
             <div key={item.id} className="print-ticket-item">
-              <p>{getTicketProductName(item)} ({item.quantity}x{formatMoney(getTicketUnitPrice(item))})</p>
+              <p className="print-ticket-product">{getTicketProductName(item)} ({item.quantity}x{formatMoney(getTicketUnitPrice(item))})</p>
               {item.item_comment?.trim() && <p className="print-ticket-detail">(Aclaración: {item.item_comment.trim()})</p>}
             </div>
           ))}

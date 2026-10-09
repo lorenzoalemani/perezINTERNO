@@ -673,11 +673,18 @@ textarea:focus {
 
 @media print {
   @page {
-    margin: 4mm;
+    size: auto;
+    margin: 5mm;
+    margin-top: 5mm;
+    margin-bottom: 5mm;
+    margin-left: 5mm;
+    margin-right: 5mm;
   }
 
   body {
     background: white;
+    margin: 0;
+    padding: 0;
   }
 
   /* El ticket se monta directamente en body. Ocultar el dashboard con
@@ -697,36 +704,50 @@ textarea:focus {
 
   .print-ticket {
     display: block;
-    position: absolute;
-    inset: 0 auto auto 0;
-    width: 72mm;
-    padding: 0;
-    color: #111827;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-    font-size: 12px;
+    position: relative;
+    width: 76mm;
+    max-width: 100%;
+    margin: 0;
+    padding: 2mm 3mm 4mm 9mm !important; /* 9mm de margen izquierdo SEGURO - NUNCA se cortan las letras iniciales */
+    box-sizing: border-box;
+    color: #000000;
+    font-family: Arial, "Segoe UI", Helvetica, sans-serif;
+    font-size: 16px;
     line-height: 1.35;
+    font-weight: 700;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
 
   .print-ticket h1,
   .print-ticket p {
-    margin: 0 0 6px;
+    margin: 0 0 5px;
+    color: #000000;
   }
 
   .print-ticket h1 {
     text-align: center;
-    font-size: 16px;
-    font-weight: 800;
+    font-size: 22px;
+    font-weight: 900;
+    letter-spacing: -0.01em;
   }
 
   .print-ticket-order,
   .print-ticket-kitchen > p:not(.print-ticket-detail) {
-    font-weight: 700;
+    font-weight: 800;
+    font-size: 17px;
+  }
+
+  .print-ticket-order {
+    font-size: 19px;
+    font-weight: 900;
+    text-align: center;
   }
 
   .print-ticket hr {
     margin: 8px 0;
     border: 0;
-    border-top: 1px dashed #111827;
+    border-top: 2px dashed #000000;
   }
 
   .print-ticket-section {
@@ -739,35 +760,38 @@ textarea:focus {
   }
 
   .print-ticket-product {
-    font-size: 14px;
-    font-weight: 800;
+    font-size: 17px;
+    font-weight: 900;
+    line-height: 1.25;
   }
 
   .print-ticket-detail {
-    margin-left: 10px !important;
-    font-size: 11px;
+    margin-left: 6px !important;
+    font-size: 14.5px;
+    font-weight: 700;
   }
 
   .print-ticket-divider {
-    height: 16mm;
+    height: 14mm;
     margin: 10px 0;
-    border-top: 2px dashed #111827;
-    border-bottom: 2px dashed #111827;
+    border-top: 2px dashed #000000;
+    border-bottom: 2px dashed #000000;
   }
 
   .print-ticket-total {
-    font-size: 14px;
-    font-weight: 800;
+    font-size: 21px;
+    font-weight: 900;
   }
 
   .print-ticket-thanks {
     margin-top: 12px !important;
     text-align: center;
-    font-weight: 700;
+    font-weight: 800;
+    font-size: 16px;
   }
 
   .print-ticket-notes {
-    font-size: 13px;
-    font-weight: 800;
+    font-size: 16px;
+    font-weight: 900;
   }
 }

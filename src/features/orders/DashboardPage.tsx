@@ -544,76 +544,71 @@ function ScheduleTable({
   }
 
   return (
-    <div className="space-y-2">
-      <div className="perez-table-head hidden rounded-lg px-3 py-2 text-xs font-black uppercase xl:grid xl:grid-cols-[76px_120px_100px_100px_90px_minmax(220px,1fr)_auto] xl:gap-2">
-        <span>Horario</span>
-        <span>Carga</span>
-        <span>Hamburguesas</span>
-        <span>Medallones</span>
-        <span>Disponibles</span>
-        <span>Pedidos y acciones</span>
-        <span>Alta</span>
-      </div>
+    <div className="space-y-3">
       {rows.map((row) => {
         const isFull = row.available === 0;
         const isHigh = row.percent >= 75;
         return (
           <section
             key={row.time}
-            className={`rounded-lg border p-2 ${
-              isFull ? 'border-red-200 bg-red-50' : isHigh ? 'border-yellow-200 bg-yellow-50' : 'border-red-100 bg-white'
+            className={`rounded-xl border p-3 sm:p-4 shadow-sm transition ${
+              isFull ? 'border-red-200 bg-red-50/70' : isHigh ? 'border-yellow-200 bg-yellow-50/70' : 'border-gray-200 bg-white'
             }`}
           >
-            <div className="grid gap-2 xl:grid-cols-[76px_120px_100px_100px_90px_minmax(220px,1fr)_auto] xl:items-start">
-              <div className="flex items-center justify-between gap-2 xl:block">
-                <span className="text-xs font-bold uppercase text-gray-500 xl:hidden">Horario</span>
-                <span className="text-xl font-black leading-none text-gray-900">{row.time}</span>
-              </div>
-              <div>
-                <div className="h-4 overflow-hidden rounded-full bg-gray-100">
-                  <div
-                    className={`h-full rounded-full ${isFull ? 'bg-red-700' : isHigh ? 'bg-yellow-500' : 'bg-green-600'}`}
-                    style={{ width: `${Math.max(4, row.percent)}%` }}
-                  />
-                </div>
-                <p className="mt-0.5 text-[11px] font-semibold text-gray-500">{row.percent.toFixed(0)}% ocupado</p>
-              </div>
-              <CompactCell label="Hamburguesas" value={String(row.burgers)} />
-              <CompactCell label="Medallones" value={String(row.medallions)} />
-              <CompactCell
-                label="Disponibles"
-                value={String(row.available)}
-                className={isFull ? 'text-red-700' : 'text-green-700'}
-              />
-              <div className="grid gap-1.5">
-                {row.orders.length === 0 ? (
-                  <p className="rounded-md border border-dashed border-gray-200 bg-white px-3 py-2 text-xs font-semibold text-gray-400">
-                    Sin pedidos
-                  </p>
-                ) : (
-                  row.orders.map((order) => (
-                    <OrderOperationRow
-                      key={order.id}
-                      isSaving={savingOrderId === order.id}
-                      canViewMoney={canViewMoney}
-                      order={order}
-                      onCancel={onCancel}
-                      onCharge={onCharge}
-                      onPrint={onPrint}
-                      onUpdateStatus={onUpdateStatus}
+            {/* Cabecera del horario con métricas y botón de Nuevo Pedido */}
+            <div className="flex flex-col gap-2.5 sm:flex-row sm:items-center sm:justify-between border-b border-gray-100 pb-2.5">
+              <div className="flex flex-wrap items-center gap-3 sm:gap-4">
+                <span className="text-xl sm:text-2xl font-black text-gray-950 min-w-[70px]">{row.time}</span>
+                <div className="w-28 sm:w-36">
+                  <div className="h-3 overflow-hidden rounded-full bg-gray-100">
+                    <div
+                      className={`h-full rounded-full ${isFull ? 'bg-red-700' : isHigh ? 'bg-yellow-500' : 'bg-green-600'}`}
+                      style={{ width: `${Math.max(4, row.percent)}%` }}
                     />
-                  ))
-                )}
+                  </div>
+                  <p className="mt-0.5 text-[11px] font-semibold text-gray-500">{row.percent.toFixed(0)}% ocupado</p>
+                </div>
+                <div className="flex items-center gap-2 text-xs font-bold text-gray-600">
+                  <span><strong className="text-gray-900">{row.burgers}</strong> hamb.</span>
+                  <span>·</span>
+                  <span><strong className="text-gray-900">{row.medallions}</strong> med.</span>
+                  <span>·</span>
+                  <span className={isFull ? 'text-red-700 font-black' : 'text-green-700 font-black'}>
+                    {row.available} disp.
+                  </span>
+                </div>
               </div>
-              <div>
+              <div className="shrink-0">
                 <button
                   type="button"
                   onClick={() => onNewOrder(row.time)}
-                  className="w-full rounded-md bg-red-700 px-2 py-2 text-xs font-black text-white hover:bg-red-800"
+                  className="w-full sm:w-auto rounded-lg bg-red-700 px-3.5 py-2 text-xs font-black text-white hover:bg-red-800 shadow-sm"
                 >
-                  + Nuevo pedido
+                  + Nuevo pedido ({row.time})
                 </button>
               </div>
+            </div>
+
+            {/* Listado de pedidos para este horario */}
+            <div className="mt-2.5 space-y-2">
+              {row.orders.length === 0 ? (
+                <p className="rounded-md border border-dashed border-gray-200 bg-gray-50/50 px-3 py-2 text-xs font-semibold text-gray-400">
+                  Sin pedidos para este horario
+                </p>
+              ) : (
+                row.orders.map((order) => (
+                  <OrderOperationRow
+                    key={order.id}
+                    isSaving={savingOrderId === order.id}
+                    canViewMoney={canViewMoney}
+                    order={order}
+                    onCancel={onCancel}
+                    onCharge={onCharge}
+                    onPrint={onPrint}
+                    onUpdateStatus={onUpdateStatus}
+                  />
+                ))
+              )}
             </div>
           </section>
         );
@@ -622,14 +617,6 @@ function ScheduleTable({
   );
 }
 
-function CompactCell({ label, value, className = '' }: { label: string; value: string; className?: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2 xl:block">
-      <span className="text-xs font-bold uppercase text-gray-500 xl:hidden">{label}</span>
-      <span className={`text-base font-black ${className}`}>{value}</span>
-    </div>
-  );
-}
 
 function OrderOperationRow({
   order,

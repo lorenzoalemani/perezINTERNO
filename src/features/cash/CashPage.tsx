@@ -110,9 +110,21 @@ export default function CashPage() {
     setLoading(true);
     setMessage(null);
 
+    // Primero buscar si hay alguna caja abierta (sin importar la fecha)
+    const openRegResult = await supabase
+      .from('cash_registers')
+      .select('*')
+      .is('closed_at', null)
+      .order('opened_at', { ascending: false })
+      .limit(1);
+
+    // Si no hay caja abierta, buscar las de hoy para mostrar la última cerrada
+    const registerResult = openRegResult.data && openRegResult.data.length > 0
+      ? openRegResult
+      : await supabase.from('cash_registers').select('*').eq('business_date', businessDate).order('opened_at', { ascending: false });
+
     const range = dayRange(businessDate);
-    const [registerResult, paymentsResult] = await Promise.all([
-      supabase.from('cash_registers').select('*').eq('business_date', businessDate).order('opened_at', { ascending: false }),
+    const [paymentsResult] = await Promise.all([
       supabase.from('payments').select('*').gte('created_at', range.from).lt('created_at', range.to),
     ]);
 
@@ -128,18 +140,18 @@ export default function CashPage() {
     const currentRegister = openRegister ?? (registers.length > 0 ? registers[0] : null);
     setRegister(currentRegister);
 
-    const allPayments = (paymentsResult.data ?? []) as Payment[];
+    const allPayments: Payment[] = [];
     if (currentRegister) {
-      const regOpenTime = new Date(currentRegister.opened_at).getTime();
-      const regCloseTime = currentRegister.closed_at ? new Date(currentRegister.closed_at).getTime() : Infinity;
-      const currentPayments = allPayments.filter((p) => {
-        const pTime = new Date(p.created_at).getTime();
-        return pTime >= regOpenTime && pTime <= regCloseTime;
-      });
-      setPayments(currentPayments);
-    } else {
-      setPayments([]);
+      const regOpen = currentRegister.opened_at;
+      const regClose = currentRegister.closed_at || new Date().toISOString();
+      const { data: regPayments } = await supabase
+        .from('payments')
+        .select('*')
+        .gte('created_at', regOpen)
+        .lte('created_at', regClose);
+      allPayments.push(...((regPayments ?? []) as Payment[]));
     }
+    setPayments(allPayments);
 
     if (currentRegister) {
       const { data, error } = await supabase
@@ -341,7 +353,18 @@ export default function CashPage() {
     }
 
     const difference = counted - summary.expectedCash;
-    if (!window.confirm(`Cerrar caja con diferencia de ${formatMoney(difference)}?`)) return;
+
+    // Verificar si hay pedidos pendientes de cobro
+    const { data: pendingSummary } = await supabase.rpc('get_register_pending_summary', {
+      p_register_id: register.id,
+    });
+    const pending = pendingSummary as { unpaid_count: number; unpaid_total: number } | null;
+
+    let confirmMsg = `Cerrar caja con diferencia de ${formatMoney(difference)}?`;
+    if (pending && pending.unpaid_count > 0) {
+      confirmMsg = `⚠️ Hay ${pending.unpaid_count} pedido(s) sin cobrar por un total de ${formatMoney(pending.unpaid_total)}.\n\nEstos pedidos quedarán sin cobrar en el historial.\n\n¿Cerrar la caja igualmente con diferencia de ${formatMoney(difference)}?`;
+    }
+    if (!window.confirm(confirmMsg)) return;
 
     setSaving(true);
     const closePayload = {
@@ -408,6 +431,11 @@ export default function CashPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Caja del dia</h1>
           <p className="text-sm text-gray-500">Fecha: {formatDate(businessDate)}</p>
+          {register && !register.closed_at && register.business_date !== businessDate && (
+            <p className="text-sm font-bold text-orange-700">
+              ⚠️ Caja abierta del día {formatDate(register.business_date)} (ayer u otro día)
+            </p>
+          )}
         </div>
         <button type="button" onClick={loadCashData} className="btn-secondary px-4 py-3 text-base">
           Actualizar

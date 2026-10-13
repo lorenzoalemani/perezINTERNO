@@ -55,6 +55,7 @@ export interface Order {
   created_at: string;
   closed_by: string | null;
   closed_at: string | null;
+  register_id?: string | null;
 }
 
 export interface OrderItem {

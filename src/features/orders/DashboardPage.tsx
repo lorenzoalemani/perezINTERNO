@@ -16,7 +16,7 @@ import {
   StatusBadge,
   statusLabels,
 } from './orderHelpers';
-import type { CashRegister, OrderItemConfig } from '../../types/database';
+import type { OrderItemConfig } from '../../types/database';
 import { BURGER_CAPACITY_PER_SLOT, PICKUP_TIME_OPTIONS } from './orderSchedule';
 
 
@@ -35,12 +35,12 @@ export default function DashboardPage() {
   const [printOrder, setPrintOrder] = useState<OrderWithItems | null>(null);
   const isPrintingRef = useRef(false);
   const [hasOpenRegister, setHasOpenRegister] = useState<boolean>(true);
-  const [clearedBefore, setClearedBefore] = useState<string | null>(() => {
-    try {
-      const stored = localStorage.getItem('scheduleClearedTimestamp');
-      return stored || null;
-    } catch { return null; }
-  });
+  const [openRegisterId, setOpenRegisterId] = useState<string | null>(null);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showClearFinalConfirm, setShowClearFinalConfirm] = useState(false);
+  const [clearingOrders, setClearingOrders] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState<string | null>(null);
+  const [_deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     loadStats();
@@ -70,14 +70,10 @@ export default function DashboardPage() {
       if (order.status === 'cancelled') {
         continue;
       }
-      // If a cleanup was performed, hide orders created prior to the cleanup timestamp
-      if (clearedBefore && new Date(order.created_at).getTime() <= new Date(clearedBefore).getTime()) {
-        continue;
-      }
       byId.set(order.id, order);
     }
     return [...byId.values()].sort((a, b) => getOrderSlot(a).localeCompare(getOrderSlot(b)) || a.order_number - b.order_number);
-  }, [clearedBefore, todayOrders]);
+  }, [todayOrders]);
   const scheduleRows = useMemo(() => buildScheduleRows(operativeOrders), [operativeOrders]);
   const dailyProduction = useMemo(
     () =>
@@ -115,44 +111,30 @@ export default function DashboardPage() {
   }
 
   async function loadDashboardOrders() {
-    // 1. Obtener la caja abierta
-    const { data: registers } = await supabase
-      .from('cash_registers')
-      .select('*')
-      .order('opened_at', { ascending: false })
-      .limit(20);
+    // 1. Consultar si hay caja abierta usando la función RPC
+    const { data: regData, error: regError } = await supabase.rpc('has_open_register');
+    
+    if (regError) throw regError;
+    
+    const regInfo = regData as { open: boolean; register_id?: string; opened_at?: string; business_date?: string };
+    setHasOpenRegister(regInfo.open);
+    setOpenRegisterId(regInfo.open && regInfo.register_id ? regInfo.register_id : null);
 
-    const openRegister = (registers as CashRegister[] | null)?.find((r) => !r.closed_at);
-    setHasOpenRegister(Boolean(openRegister));
-
-    // Si no hay caja abierta (está cerrada o nunca se abrió), no hay pedidos operativos activos en el dashboard
-    if (!openRegister) {
-      return {
-        today: [] as OrderWithItems[],
-      };
+    if (!regInfo.open || !regInfo.register_id) {
+      return { today: [] as OrderWithItems[] };
     }
 
-    // Si hay caja abierta y se había limpiado antes de que abra esta caja, reiniciar el estado de limpieza
-    if (clearedBefore && new Date(clearedBefore).getTime() < new Date(openRegister.opened_at).getTime()) {
-      setClearedBefore(null);
-      try {
-        localStorage.removeItem('scheduleClearedTimestamp');
-      } catch { /* ignore */ }
-    }
-
-    // Cargar únicamente los pedidos realizados desde la apertura de dicha caja abierta
+    // 2. Cargar pedidos por register_id
     const { data, error } = await supabase
       .from('orders')
       .select('*, order_items(*, order_item_modifiers(*)), payments(*)')
-      .gte('created_at', openRegister.opened_at)
+      .eq('register_id', regInfo.register_id)
       .order('pickup_time', { ascending: true })
       .limit(500);
 
     if (error) throw error;
 
-    return {
-      today: (data ?? []) as OrderWithItems[],
-    };
+    return { today: (data ?? []) as OrderWithItems[] };
   }
 
   function printTicket(order: OrderWithItems) {
@@ -182,7 +164,7 @@ export default function DashboardPage() {
 
   async function cancelOrder(order: OrderWithItems) {
     if (order.status === 'cancelled') return;
-    if (!window.confirm(`Eliminar el pedido #${order.order_number}? Quedara cancelado en el historial.`)) return;
+    if (!window.confirm(`¿Cancelar el pedido #${order.order_number}? Quedará marcado como cancelado.`)) return;
 
     setSavingOrderId(order.id);
     setMessage(null);
@@ -190,11 +172,47 @@ export default function DashboardPage() {
     setSavingOrderId(null);
 
     if (error) {
+      setMessage('No se pudo cancelar el pedido.');
+      return;
+    }
+
+    setMessage(`Pedido #${order.order_number} cancelado.`);
+    await loadStats();
+  }
+
+  async function deleteOrderPermanently(orderId: string, orderNumber: number) {
+    setDeletingOrderId(orderId);
+    setShowDeleteConfirm(null);
+    setMessage(null);
+    const { error } = await supabase.rpc('delete_order_permanently', { p_order_id: orderId });
+    setDeletingOrderId(null);
+
+    if (error) {
       setMessage('No se pudo eliminar el pedido.');
       return;
     }
 
-    setMessage(`Pedido #${order.order_number} eliminado/cancelado.`);
+    setMessage(`Pedido #${orderNumber} eliminado permanentemente.`);
+    await loadStats();
+  }
+
+  async function handleClearOrders() {
+    if (!openRegisterId) return;
+    setClearingOrders(true);
+    setShowClearFinalConfirm(false);
+    setShowClearConfirm(false);
+    setMessage(null);
+    
+    const { data, error } = await supabase.rpc('clear_register_orders', { p_register_id: openRegisterId });
+    setClearingOrders(false);
+
+    if (error) {
+      setMessage('No se pudieron limpiar los pedidos.');
+      return;
+    }
+
+    const result = data as { deleted_count: number; deleted_total: number } | null;
+    setMessage(`Se eliminaron ${result?.deleted_count ?? 0} pedidos permanentemente.`);
     await loadStats();
   }
 
@@ -265,31 +283,11 @@ export default function DashboardPage() {
               <div className="flex justify-start sm:justify-end">
                 <button
                   type="button"
-                  onClick={() => {
-                    if (clearedBefore) {
-                      if (!window.confirm('¿Estás seguro de que deseas restaurar los pedidos al dashboard?')) {
-                        return;
-                      }
-                      setClearedBefore(null);
-                      try {
-                        localStorage.removeItem('scheduleClearedTimestamp');
-                      } catch { /* ignore */ }
-                      setMessage('Los pedidos volvieron a mostrarse en la planilla.');
-                    } else {
-                      if (!window.confirm('¿Estás seguro de que deseas limpiar todos los pedidos del dashboard?')) {
-                        return;
-                      }
-                      const newTimestamp = new Date().toISOString();
-                      setClearedBefore(newTimestamp);
-                      try {
-                        localStorage.setItem('scheduleClearedTimestamp', newTimestamp);
-                      } catch { /* ignore */ }
-                      setMessage('Los pedidos existentes fueron limpiados del dashboard.');
-                    }
-                  }}
-                  className="min-h-11 rounded-lg border border-red-100 bg-white px-3 py-2 text-sm font-black text-gray-700 hover:border-red-300 hover:text-red-800"
+                  disabled={clearingOrders || operativeOrders.length === 0}
+                  onClick={() => setShowClearConfirm(true)}
+                  className="min-h-11 rounded-lg border-2 border-red-300 bg-white px-3 py-2 text-sm font-black text-red-700 hover:border-red-500 hover:bg-red-50 disabled:opacity-50"
                 >
-                  {clearedBefore ? 'Restaurar pedidos' : 'Limpiar pedidos'}
+                  {clearingOrders ? 'Limpiando...' : '🗑️ Limpiar pedidos'}
                 </button>
               </div>
             </div>
@@ -312,6 +310,7 @@ export default function DashboardPage() {
                 savingOrderId={savingOrderId}
                 canViewMoney={isAdmin}
                 onCancel={cancelOrder}
+                onDelete={(order) => setShowDeleteConfirm(order.id)}
                 onCharge={setChargeOrder}
                 onNewOrder={(time) => {
                   if (!hasOpenRegister) {
@@ -419,6 +418,112 @@ export default function DashboardPage() {
         />
       )}
 
+      {/* Modal: Confirmar limpieza de pedidos - Paso 1 */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl border-2 border-red-300">
+            <div className="text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-100">
+                <span className="text-3xl">⚠️</span>
+              </div>
+              <h3 className="text-xl font-black text-red-800">¿Limpiar TODOS los pedidos?</h3>
+              <p className="mt-3 text-sm text-gray-600">
+                Esto eliminará <strong className="text-red-700">permanentemente</strong> todos los pedidos de la caja actual, incluyendo sus pagos.
+              </p>
+              <p className="mt-2 text-sm font-bold text-red-700">
+                Los pedidos cobrados se restarán de la caja. Esta acción NO se puede deshacer.
+              </p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowClearConfirm(false);
+                  setShowClearFinalConfirm(true);
+                }}
+                className="flex-1 rounded-lg bg-red-700 px-4 py-3 text-sm font-black text-white hover:bg-red-800"
+              >
+                Sí, continuar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar limpieza de pedidos - Paso 2 (confirmación final) */}
+      {showClearFinalConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-md rounded-xl bg-white p-6 shadow-2xl border-4 border-red-500">
+            <div className="text-center">
+              <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-red-600">
+                <span className="text-3xl text-white">🚨</span>
+              </div>
+              <h3 className="text-xl font-black text-red-900">ÚLTIMA CONFIRMACIÓN</h3>
+              <p className="mt-3 text-base font-bold text-red-800">
+                Hay {operativeOrders.length} pedido(s) que serán eliminados para siempre.
+              </p>
+              <p className="mt-2 text-sm text-gray-600">
+                ¿Estás completamente seguro? No podrás recuperarlos.
+              </p>
+            </div>
+            <div className="mt-6 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowClearFinalConfirm(false)}
+                className="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50"
+              >
+                No, cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleClearOrders}
+                className="flex-1 rounded-lg bg-red-800 px-4 py-3 text-sm font-black text-white hover:bg-red-900 ring-2 ring-red-400"
+              >
+                CONFIRMAR ELIMINACIÓN
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Confirmar eliminación individual */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="w-full max-w-sm rounded-xl bg-white p-6 shadow-2xl border-2 border-red-300">
+            <h3 className="text-lg font-black text-red-800">¿Eliminar este pedido?</h3>
+            <p className="mt-2 text-sm text-gray-600">
+              El pedido será eliminado permanentemente de la base de datos junto con sus pagos. No se puede deshacer.
+            </p>
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(null)}
+                className="flex-1 rounded-lg border border-gray-300 px-4 py-3 text-sm font-bold text-gray-700 hover:bg-gray-50"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const order = todayOrders.find(o => o.id === showDeleteConfirm);
+                  if (order) deleteOrderPermanently(order.id, order.order_number);
+                }}
+                className="flex-1 rounded-lg bg-red-700 px-4 py-3 text-sm font-black text-white hover:bg-red-800"
+              >
+                Eliminar permanentemente
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <PrintableOrderTicket order={printOrder} />
     </div>
   );
@@ -521,6 +626,7 @@ function ScheduleTable({
   canViewMoney,
   onCharge,
   onCancel,
+  onDelete,
   onNewOrder,
   onPrint,
   onUpdateStatus,
@@ -531,6 +637,7 @@ function ScheduleTable({
   canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
+  onDelete: (order: OrderWithItems) => void;
   onNewOrder: (time: string) => void;
   onPrint: (order: OrderWithItems) => void;
   onUpdateStatus: (order: OrderWithItems) => void;
@@ -603,6 +710,7 @@ function ScheduleTable({
                     canViewMoney={canViewMoney}
                     order={order}
                     onCancel={onCancel}
+                    onDelete={onDelete}
                     onCharge={onCharge}
                     onPrint={onPrint}
                     onUpdateStatus={onUpdateStatus}
@@ -624,6 +732,7 @@ function OrderOperationRow({
   canViewMoney,
   onCharge,
   onCancel,
+  onDelete,
   onPrint,
   onUpdateStatus,
 }: {
@@ -632,6 +741,7 @@ function OrderOperationRow({
   canViewMoney: boolean;
   onCharge: (order: OrderWithItems) => void;
   onCancel: (order: OrderWithItems) => void;
+  onDelete: (order: OrderWithItems) => void;
   onPrint: (order: OrderWithItems) => void;
   onUpdateStatus: (order: OrderWithItems) => void;
 }) {
@@ -687,9 +797,17 @@ function OrderOperationRow({
               disabled={isSaving}
               className="rounded-md border border-red-200 bg-white px-2 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50"
             >
-              Eliminar
+              Cancelar
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => onDelete(order)}
+            disabled={isSaving}
+            className="rounded-md border-2 border-red-300 bg-white px-2 py-1.5 text-xs font-black text-red-700 hover:border-red-500 hover:bg-red-50 disabled:opacity-50"
+          >
+            Eliminar
+          </button>
         </div>
       </div>
     </div>

@@ -21,7 +21,6 @@ type CartItem = {
 };
 
 type CustomerForm = {
-  firstName: string;
   lastName: string;
   pickupTime: string;
   notes: string;
@@ -159,7 +158,6 @@ export default function NewOrderPage() {
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [customer, setCustomer] = useState<CustomerForm>({
-    firstName: '',
     lastName: '',
     pickupTime: initialPickup ?? '',
     notes: '',
@@ -322,10 +320,6 @@ export default function NewOrderPage() {
       setMessage({ type: 'error', text: 'Agrega al menos un producto al pedido.' });
       return false;
     }
-    if (!customer.firstName.trim() || !customer.lastName.trim()) {
-      setMessage({ type: 'error', text: 'Completa nombre y apellido del cliente.' });
-      return false;
-    }
     if (!customer.pickupTime) {
       setMessage({ type: 'error', text: 'Selecciona un horario de retiro.' });
       return false;
@@ -379,8 +373,10 @@ export default function NewOrderPage() {
       })),
     }));
 
+    const customerName = customer.lastName.trim() || 'Sin nombre';
+
     const { data, error } = await supabase.rpc('create_order', {
-      p_customer_name: `${customer.firstName.trim()} ${customer.lastName.trim()}`,
+      p_customer_name: customerName,
       p_pickup_time: toPickupDateTime(customer.pickupTime),
       p_notes: customer.notes.trim() || null,
       p_items: payload,
@@ -616,26 +612,16 @@ export default function NewOrderPage() {
                 )}
               </div>
 
-              <div className="new-order-fields">
-                <label>
-                  <span>Nombre</span>
-                  <input
-                    value={customer.firstName}
-                    onChange={(event) => setCustomer({ ...customer, firstName: event.target.value })}
-                    className="new-order-input"
-                    autoComplete="off"
-                  />
-                </label>
-                <label>
-                  <span>Apellido</span>
-                  <input
-                    value={customer.lastName}
-                    onChange={(event) => setCustomer({ ...customer, lastName: event.target.value })}
-                    className="new-order-input"
-                    autoComplete="off"
-                  />
-                </label>
-              </div>
+              <label className="new-order-field">
+                <span>Apellido</span>
+                <input
+                  value={customer.lastName}
+                  onChange={(event) => setCustomer({ ...customer, lastName: event.target.value })}
+                  className="new-order-input"
+                  placeholder="Apellido del cliente (opcional)"
+                  autoComplete="off"
+                />
+              </label>
 
               <label className="new-order-field">
                 <span>Horario de retiro</span>
@@ -1035,7 +1021,7 @@ function ReviewModal({
       <div className="perez-modal max-h-[90vh] w-full max-w-2xl overflow-y-auto">
         <h2 className="text-xl font-bold">Revisar pedido</h2>
         <p className="mt-1 text-sm text-gray-500">
-          {customer.firstName} {customer.lastName} - Retiro: {customer.pickupTime}
+          {customer.lastName.trim() || 'Sin nombre'} - Retiro: {customer.pickupTime}
         </p>
 
         <OrderSummary cart={cart} className="mt-4" />

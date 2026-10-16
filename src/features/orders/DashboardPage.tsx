@@ -91,6 +91,24 @@ export default function DashboardPage() {
     [operativeOrders]
   );
 
+  const burgerVarieties = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const order of operativeOrders) {
+      if (order.status === 'cancelled') continue;
+      for (const item of order.order_items) {
+        const config = item.item_config as OrderItemConfig | null;
+        const isBurger = config?.kind === 'burger' || isBurgerItem(item.product_name_snapshot);
+        if (!isBurger) continue;
+        const name = item.product_name_snapshot;
+        const qty = Number(item.quantity) || 0;
+        counts.set(name, (counts.get(name) ?? 0) + qty);
+      }
+    }
+    return Array.from(counts.entries())
+      .filter(([_, qty]) => qty > 0)
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+  }, [operativeOrders]);
+
   async function loadStats() {
     setLoading(true);
     setErrorMessage(null);
@@ -296,6 +314,27 @@ export default function DashboardPage() {
               <MiniMetric label="Hamburguesas del dia" value={String(dailyProduction.burgers)} />
               <MiniMetric label="Medallones del dia" value={String(dailyProduction.medallions)} />
             </div>
+
+            {burgerVarieties.length > 0 && (
+              <div className="rounded-xl border border-red-100 bg-white p-3.5 shadow-sm">
+                <p className="text-xs font-bold uppercase tracking-wider text-gray-500 mb-2.5">
+                  Variedades de hamburguesas
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {burgerVarieties.map(([name, count]) => (
+                    <div
+                      key={name}
+                      className="inline-flex items-center gap-2 rounded-lg border border-red-200 bg-red-50/50 px-3 py-1.5 text-sm font-bold text-gray-900"
+                    >
+                      <span>{name}:</span>
+                      <span className="rounded-md bg-red-700 px-2 py-0.5 text-xs font-black text-white">
+                        {count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             <div className="rounded-lg border border-red-100 bg-white p-3">
               <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -677,12 +716,6 @@ function ScheduleTable({
                 </div>
                 <div className="flex items-center gap-2 text-xs font-bold text-gray-600">
                   <span><strong className="text-gray-900">{row.burgers}</strong> hamb.</span>
-                  <span>·</span>
-                  <span><strong className="text-gray-900">{row.medallions}</strong> med.</span>
-                  <span>·</span>
-                  <span className={isFull ? 'text-red-700 font-black' : 'text-green-700 font-black'}>
-                    {row.available} disp.
-                  </span>
                 </div>
               </div>
               <div className="shrink-0">

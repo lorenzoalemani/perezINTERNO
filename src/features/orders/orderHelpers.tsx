@@ -294,7 +294,15 @@ type KitchenTicketItem = {
 
 function getTicketProductName(item: OrderItemWithModifiers) {
   const configLines = getOrderItemConfigLines({ item_config: item.item_config, item_comment: null });
-  return [item.product_name_snapshot, ...configLines].join(' ');
+  const filteredLines = configLines.filter((line) => {
+    const normLine = line.toLowerCase();
+    const normName = item.product_name_snapshot.toLowerCase();
+    if ((normLine === 'sazonadas' || normLine === 'sazonados') && normName.includes('sazonad')) {
+      return false;
+    }
+    return true;
+  });
+  return [item.product_name_snapshot, ...filteredLines].join(' ');
 }
 
 function getTicketUnitPrice(item: OrderItemWithModifiers) {

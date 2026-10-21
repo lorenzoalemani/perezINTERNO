@@ -76,12 +76,17 @@ function getVariantPrice(product: Product, key: 'Simple' | 'Doble' | 'Triple') {
 
 function formatProductPrice(product: Product, categoryName: string | undefined) {
   if (isBurgerCategory(categoryName)) {
-    const simple = getVariantPrice(product, 'Simple') || Number(product.price);
+    const simple = getVariantPrice(product, 'Simple');
     const doble = getVariantPrice(product, 'Doble');
     const triple = getVariantPrice(product, 'Triple');
-    if (simple || doble || triple) {
-      return `${formatMoney(simple)} / ${formatMoney(doble || simple)} / ${formatMoney(triple || doble || simple)}`;
+    const parts: string[] = [];
+    if (simple > 0) parts.push(`Simple ${formatMoney(simple)}`);
+    if (doble > 0) parts.push(`Doble ${formatMoney(doble)}`);
+    if (triple > 0) parts.push(`Triple ${formatMoney(triple)}`);
+    if (parts.length > 0) {
+      return parts.join(' / ');
     }
+    return formatMoney(Number(product.price));
   }
   return formatMoney(Number(product.price));
 }
@@ -173,9 +178,9 @@ export default function ProductsPage() {
       name: product.name,
       category_id: product.category_id ?? '',
       price: String(product.price),
-      simplePrice: String(getVariantPrice(product, 'Simple') || product.price || ''),
-      doublePrice: String(getVariantPrice(product, 'Doble') || ''),
-      triplePrice: String(getVariantPrice(product, 'Triple') || ''),
+      simplePrice: String(product.variant_prices?.Simple ?? (product.price || '')),
+      doublePrice: String(product.variant_prices?.Doble ?? ''),
+      triplePrice: String(product.variant_prices?.Triple ?? ''),
       description: product.description ?? '',
       active: product.active,
       modifierIds: product.modifierIds,
@@ -193,7 +198,9 @@ export default function ProductsPage() {
     const simplePrice = normalizePrice(productForm.simplePrice);
     const doublePrice = normalizePrice(productForm.doublePrice);
     const triplePrice = normalizePrice(productForm.triplePrice);
-    const price = isBurger ? simplePrice : normalizePrice(productForm.price);
+    const price = isBurger
+      ? (simplePrice > 0 ? simplePrice : doublePrice > 0 ? doublePrice : triplePrice > 0 ? triplePrice : 0)
+      : normalizePrice(productForm.price);
 
     if (!trimmedName) {
       setMessage({ type: 'error', text: 'El nombre del producto es obligatorio.' });

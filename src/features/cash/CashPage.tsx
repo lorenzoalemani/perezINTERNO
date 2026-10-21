@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useAuth } from '../auth/AuthContext';
 import { supabase } from '../../lib/supabase';
-import type { CashMovement, CashRegister, Payment } from '../../types/database';
+import type { CashMovement, CashRegister, OrderItemConfig, Payment } from '../../types/database';
+import type { OrderWithItems } from '../orders/orderHelpers';
 
 type Message = { type: 'success' | 'error'; text: string };
 type MovementType = 'income' | 'expense';
@@ -15,6 +16,99 @@ type RegisterSummary = {
   expectedCash: number;
   totalSold: number;
 };
+
+export type SoldProductsSummary = {
+  burgers: number;
+  dips: number;
+  papas: number;
+  nuggets: number;
+  aros: number;
+  boniatos: number;
+  bebidas: number;
+};
+
+function calculateSoldProducts(orders: OrderWithItems[]): SoldProductsSummary {
+  const summary: SoldProductsSummary = {
+    burgers: 0,
+    dips: 0,
+    papas: 0,
+    nuggets: 0,
+    aros: 0,
+    boniatos: 0,
+    bebidas: 0,
+  };
+
+  for (const order of orders) {
+    if (order.status === 'cancelled') continue;
+    for (const item of order.order_items ?? []) {
+      const q = Number(item.quantity) || 0;
+      const name = (item.product_name_snapshot ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const config = item.item_config as OrderItemConfig | null;
+
+      if (
+        config?.kind === 'burger' ||
+        name.includes('CHEESE') ||
+        name.includes('BURGER') ||
+        name.includes('CRIOLLA') ||
+        name.includes('BBQ') ||
+        name.includes('BACON') ||
+        name.includes('DE LA SEMANA')
+      ) {
+        summary.burgers += q;
+      } else if (config?.kind === 'dip' || name.includes('DIP')) {
+        summary.dips += q;
+      } else if (name.includes('BONIATO')) {
+        summary.boniatos += q;
+      } else if (name.includes('PAPA')) {
+        summary.papas += q;
+      } else if (name.includes('NUGGET')) {
+        summary.nuggets += q;
+      } else if (name.includes('ARO')) {
+        summary.aros += q;
+      } else if (
+        config?.kind === 'beverage' ||
+        name.includes('GASEOSA') ||
+        name.includes('AGUA') ||
+        name.includes('MILLER') ||
+        name.includes('HEINEKEN') ||
+        name.includes('BUDWEISER') ||
+        name.includes('COCA') ||
+        name.includes('SPRITE') ||
+        name.includes('FANTA') ||
+        name.includes('CERVEZA')
+      ) {
+        summary.bebidas += q;
+      } else if (name.includes('CARNE')) {
+        summary.burgers += q;
+      }
+    }
+  }
+
+  return summary;
+}
+
+async function fetchSoldProductsForRegister(reg: CashRegister): Promise<SoldProductsSummary> {
+  const regOpen = reg.opened_at;
+  const regClose = reg.closed_at || new Date().toISOString();
+
+  let { data: regOrders } = await supabase
+    .from('orders')
+    .select('*, order_items(*, order_item_modifiers(*))')
+    .eq('register_id', reg.id)
+    .neq('status', 'cancelled');
+
+  if (!regOrders || regOrders.length === 0) {
+    const { data: fallbackOrders } = await supabase
+      .from('orders')
+      .select('*, order_items(*, order_item_modifiers(*))')
+      .gte('created_at', regOpen)
+      .lte('created_at', regClose)
+      .neq('status', 'cancelled');
+    regOrders = fallbackOrders;
+  }
+
+  return calculateSoldProducts((regOrders ?? []) as OrderWithItems[]);
+}
 
 const moneyFormatter = new Intl.NumberFormat('es-AR', {
   style: 'currency',
@@ -93,6 +187,12 @@ export default function CashPage() {
   const [payments, setPayments] = useState<Payment[]>([]);
   const [movements, setMovements] = useState<CashMovement[]>([]);
   const [history, setHistory] = useState<RegisterSummary[]>([]);
+  const [soldProducts, setSoldProducts] = useState<SoldProductsSummary | null>(null);
+  const [closingSummaryModal, setClosingSummaryModal] = useState<{
+    register: CashRegister;
+    summary: RegisterSummary;
+    soldProducts: SoldProductsSummary;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<Message | null>(null);
@@ -165,8 +265,12 @@ export default function CashPage() {
       } else {
         setMovements((data ?? []) as CashMovement[]);
       }
+
+      const sold = await fetchSoldProductsForRegister(currentRegister);
+      setSoldProducts(sold);
     } else {
       setMovements([]);
+      setSoldProducts(null);
     }
 
     await loadHistory();
@@ -411,10 +515,37 @@ export default function CashPage() {
       return;
     }
 
+    const closedReg = closeResult.data as CashRegister;
+    const finalSold = await fetchSoldProductsForRegister(closedReg);
+    const finalSummary: RegisterSummary = {
+      register: closedReg,
+      cashSales: summary.cashSales,
+      transferSales: summary.transferSales,
+      manualIncome: summary.manualIncome,
+      expenses: summary.expenses,
+      expectedCash: summary.expectedCash,
+      totalSold: summary.totalSold,
+    };
+
     setClosingAmount('');
-    setRegister(closeResult.data as CashRegister);
+    setRegister(closedReg);
+    setSoldProducts(finalSold);
+    setClosingSummaryModal({
+      register: closedReg,
+      summary: finalSummary,
+      soldProducts: finalSold,
+    });
     setMessage({ type: 'success', text: 'Caja cerrada correctamente.' });
     await loadCashData();
+  }
+
+  async function viewHistoryRegisterSummary(item: RegisterSummary) {
+    const sold = await fetchSoldProductsForRegister(item.register);
+    setClosingSummaryModal({
+      register: item.register,
+      summary: item,
+      soldProducts: sold,
+    });
   }
 
   const summary = useMemo(
@@ -457,29 +588,64 @@ export default function CashPage() {
       {loading ? (
         <div className="card py-12 text-center text-gray-500">Cargando caja...</div>
       ) : !register || register.closed_at ? (
-        <form onSubmit={openRegister} className="card max-w-xl space-y-4">
-          <div>
-            <h2 className="text-xl font-bold">Abrir caja</h2>
-            <p className="text-sm text-gray-500">
-              {register?.closed_at
-                ? 'La caja anterior fue cerrada. Podes abrir una nueva.'
-                : 'Registra el efectivo inicial. No cuenta como venta.'}
-            </p>
-          </div>
-          <label className="block">
-            <span className="text-sm font-semibold text-gray-700">Monto inicial</span>
-            <input
-              value={openingAmount}
-              onChange={(event) => setOpeningAmount(event.target.value)}
-              inputMode="decimal"
-              className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-xl font-bold"
-              placeholder="0"
-            />
-          </label>
-          <button type="submit" disabled={saving} className="btn-primary">
-            {saving ? 'Abriendo...' : 'Abrir caja'}
-          </button>
-        </form>
+        <div className="space-y-6">
+          <form onSubmit={openRegister} className="card max-w-xl space-y-4">
+            <div>
+              <h2 className="text-xl font-bold">Abrir caja</h2>
+              <p className="text-sm text-gray-500">
+                {register?.closed_at
+                  ? 'La caja anterior fue cerrada. Podes abrir una nueva.'
+                  : 'Registra el efectivo inicial. No cuenta como venta.'}
+              </p>
+            </div>
+            <label className="block">
+              <span className="text-sm font-semibold text-gray-700">Monto inicial</span>
+              <input
+                value={openingAmount}
+                onChange={(event) => setOpeningAmount(event.target.value)}
+                inputMode="decimal"
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3 text-xl font-bold"
+                placeholder="0"
+              />
+            </label>
+            <button type="submit" disabled={saving} className="btn-primary">
+              {saving ? 'Abriendo...' : 'Abrir caja'}
+            </button>
+          </form>
+
+          {register?.closed_at && summary && soldProducts && (
+            <div className="card space-y-5">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between border-b pb-4">
+                <div>
+                  <span className="text-xs font-black uppercase tracking-wider text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">
+                    Última caja cerrada
+                  </span>
+                  <h2 className="mt-2 text-xl font-bold text-gray-900">
+                    Caja del {formatDate(register.business_date)}
+                  </h2>
+                  <p className="text-sm text-gray-500">
+                    Cerrada: {formatDateTime(register.closed_at)} · Total vendido: {formatMoney(summary.totalSold)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setClosingSummaryModal({
+                      register,
+                      summary,
+                      soldProducts,
+                    })
+                  }
+                  className="btn-secondary px-4 py-2 text-sm font-semibold"
+                >
+                  Ver resumen completo
+                </button>
+              </div>
+
+              <SoldProductsGrid soldProducts={soldProducts} />
+            </div>
+          )}
+        </div>
       ) : summary ? (
         <>
           <section className="grid gap-4 md:grid-cols-3">
@@ -526,6 +692,12 @@ export default function CashPage() {
                     danger={Number(register.closing_difference_amount ?? 0) < 0}
                     highlight={Number(register.closing_difference_amount ?? 0) >= 0}
                   />
+                </div>
+              )}
+
+              {soldProducts && (
+                <div className="border-t border-gray-200 pt-5">
+                  <SoldProductsGrid soldProducts={soldProducts} />
                 </div>
               )}
 
@@ -681,6 +853,15 @@ export default function CashPage() {
                         {item.register.closed_at && (
                           <button
                             type="button"
+                            onClick={() => viewHistoryRegisterSummary(item)}
+                            className="rounded border border-orange-300 bg-orange-50 px-2 py-1 text-xs font-semibold text-orange-700 hover:bg-orange-100"
+                          >
+                            Ver resumen
+                          </button>
+                        )}
+                        {item.register.closed_at && (
+                          <button
+                            type="button"
                             onClick={() => startEditRegister(item)}
                             className="rounded border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 hover:bg-gray-100"
                           >
@@ -765,6 +946,149 @@ export default function CashPage() {
           </div>
         </div>
       )}
+
+      {closingSummaryModal && (
+        <ClosingSummaryModal
+          data={closingSummaryModal}
+          onClose={() => setClosingSummaryModal(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+export function SoldProductsGrid({ soldProducts }: { soldProducts: SoldProductsSummary }) {
+  const items = [
+    { label: 'Burgers', count: soldProducts.burgers },
+    { label: 'Dips', count: soldProducts.dips },
+    { label: 'Papas', count: soldProducts.papas },
+    { label: 'Nuggets', count: soldProducts.nuggets },
+    { label: 'Aros', count: soldProducts.aros },
+    { label: 'Boniatos', count: soldProducts.boniatos },
+    { label: 'Bebidas', count: soldProducts.bebidas },
+  ];
+
+  return (
+    <div className="space-y-3">
+      <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">
+        PRODUCTOS VENDIDOS
+      </h3>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm"
+          >
+            <p className="text-sm font-semibold text-gray-700">{item.label}</p>
+            <p className="mt-2 text-3xl font-black text-gray-900">{item.count}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ClosingSummaryModal({
+  data,
+  onClose,
+}: {
+  data: {
+    register: CashRegister;
+    summary: RegisterSummary;
+    soldProducts: SoldProductsSummary;
+  };
+  onClose: () => void;
+}) {
+  const { register, summary, soldProducts } = data;
+  const diff = Number(register.closing_difference_amount ?? 0);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-2xl space-y-6">
+        <div className="flex items-start justify-between border-b pb-4">
+          <div>
+            <span className="text-xs font-black uppercase tracking-wider text-green-700 bg-green-50 px-2.5 py-1 rounded-full border border-green-200">
+              Caja Cerrada
+            </span>
+            <h2 className="mt-2 text-2xl font-black text-gray-900">
+              Resumen de cierre de caja
+            </h2>
+            <p className="text-sm text-gray-500">
+              Fecha: {formatDate(register.business_date)} · Cierre: {formatDateTime(register.closed_at)}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-gray-200 px-3 py-1.5 text-sm font-bold text-gray-600 hover:bg-gray-100"
+          >
+            Cerrar
+          </button>
+        </div>
+
+        {/* Resumen financiero */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs font-bold text-gray-500 uppercase">Monto inicial</p>
+            <p className="text-lg font-black text-gray-900">{formatMoney(Number(register.opening_amount))}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs font-bold text-gray-500 uppercase">Ventas efectivo</p>
+            <p className="text-lg font-black text-gray-900">{formatMoney(summary.cashSales)}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs font-bold text-gray-500 uppercase">Ventas transf.</p>
+            <p className="text-lg font-black text-gray-900">{formatMoney(summary.transferSales)}</p>
+          </div>
+          <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+            <p className="text-xs font-bold text-gray-500 uppercase">Total vendido</p>
+            <p className="text-lg font-black text-green-700">{formatMoney(summary.totalSold)}</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="rounded-xl border border-orange-200 bg-orange-50 p-3.5">
+            <p className="text-xs font-bold text-orange-800 uppercase">Efectivo esperado</p>
+            <p className="text-xl font-black text-gray-900">{formatMoney(summary.expectedCash)}</p>
+          </div>
+          <div className="rounded-xl border border-blue-200 bg-blue-50 p-3.5">
+            <p className="text-xs font-bold text-blue-800 uppercase">Efectivo contado</p>
+            <p className="text-xl font-black text-gray-900">
+              {register.closing_amount !== null ? formatMoney(Number(register.closing_amount)) : '-'}
+            </p>
+          </div>
+          <div className={`rounded-xl border p-3.5 ${diff < 0 ? 'border-red-200 bg-red-50' : 'border-green-200 bg-green-50'}`}>
+            <p className={`text-xs font-bold uppercase ${diff < 0 ? 'text-red-800' : 'text-green-800'}`}>
+              {diff < 0 ? 'Faltante' : 'Sobrante'}
+            </p>
+            <p className={`text-xl font-black ${diff < 0 ? 'text-red-700' : 'text-green-700'}`}>
+              {formatMoney(Math.abs(diff))}
+            </p>
+          </div>
+        </div>
+
+        {/* PRODUCTOS VENDIDOS */}
+        <div className="border-t border-gray-200 pt-5">
+          <SoldProductsGrid soldProducts={soldProducts} />
+        </div>
+
+        <div className="flex justify-end gap-3 border-t pt-4">
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="btn-secondary px-4 py-2.5 text-sm"
+          >
+            Imprimir
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="btn-primary px-5 py-2.5 text-sm"
+          >
+            Aceptar
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

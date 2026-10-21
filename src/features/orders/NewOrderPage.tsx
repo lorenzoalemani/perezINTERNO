@@ -97,6 +97,13 @@ function requiresProductConfig(product: ProductWithCategory) {
 function defaultItemConfig(product: ProductWithCategory): OrderItemConfig {
   if (isCategory(product, 'DIPS')) return { kind: 'dip' };
   if (isCategory(product, 'BEBIDAS')) return { kind: 'beverage' };
+  const name = normalizeText(product.name);
+  if (name.includes('PAPA') || name.includes('BONIATO')) {
+    return {
+      kind: 'extra',
+      seasoning: name.includes('PAPA') ? 'Sazonadas' : 'Sazonados',
+    };
+  }
   return { kind: 'plain' };
 }
 
@@ -110,9 +117,16 @@ function getCapacityUnits(product: ProductWithCategory, config: OrderItemConfig)
 function formatProductPrice(product: ProductWithCategory) {
   if (isCategory(product, 'HAMBURGUESAS')) {
     const prices = product.variant_prices ?? {};
-    const simple = Number(prices.Simple ?? product.price);
-    const triple = Number(prices.Triple ?? 0);
-    return triple > simple ? `${formatMoney(simple)} a ${formatMoney(triple)}` : formatMoney(simple);
+    const validPrices = (['Simple', 'Doble', 'Triple'] as const)
+      .map((size) => Number(prices[size] ?? (size === 'Simple' ? product.price : 0)))
+      .filter((p) => p > 0);
+    if (validPrices.length > 0) {
+      const minPrice = Math.min(...validPrices);
+      const maxPrice = Math.max(...validPrices);
+      return maxPrice > minPrice
+        ? `${formatMoney(minPrice)} a ${formatMoney(maxPrice)}`
+        : formatMoney(minPrice);
+    }
   }
   return Number(product.price) > 0 ? formatMoney(Number(product.price)) : 'Precio pendiente';
 }
@@ -273,7 +287,8 @@ export default function NewOrderPage() {
     selectedIds: string[],
     itemConfig: OrderItemConfig,
     itemComment: string | null,
-    capacityUnits: number
+    capacityUnits: number,
+    quantityToAdd: number = 1
   ) {
     const selectedModifiers = selectedIds
       .map((id) => modifiersById.get(id))
@@ -284,13 +299,13 @@ export default function NewOrderPage() {
       const existing = currentCart.find((item) => item.key === key);
       if (existing) {
         return currentCart.map((item) =>
-          item.key === key ? { ...item, quantity: item.quantity + 1 } : item
+          item.key === key ? { ...item, quantity: item.quantity + quantityToAdd } : item
         );
       }
       return [...currentCart, {
         key,
         product,
-        quantity: 1,
+        quantity: quantityToAdd,
         modifiers: selectedModifiers,
         itemConfig,
         itemComment,
@@ -691,8 +706,8 @@ export default function NewOrderPage() {
         <ProductConfigModal
           product={configProduct}
           onCancel={() => setConfigProduct(null)}
-          onConfirm={(itemConfig, itemComment, capacityUnits) =>
-            addConfiguredProduct(configProduct, [], itemConfig, itemComment, capacityUnits)
+          onConfirm={(itemConfig, itemComment, capacityUnits, quantity) =>
+            addConfiguredProduct(configProduct, [], itemConfig, itemComment, capacityUnits, quantity)
           }
         />
       )}
@@ -718,21 +733,35 @@ function ProductConfigModal({
 }: {
   product: ProductWithCategory;
   onCancel: () => void;
-  onConfirm: (itemConfig: OrderItemConfig, itemComment: string | null, capacityUnits: number) => void;
+  onConfirm: (itemConfig: OrderItemConfig, itemComment: string | null, capacityUnits: number, quantity: number) => void;
 }) {
-  const [meatSize, setMeatSize] = useState<'Simple' | 'Doble' | 'Triple'>('Simple');
-  const [protein, setProtein] = useState<BurgerProtein>('carne');
-  const [extraMeats, setExtraMeats] = useState(0);
-  const [comment, setComment] = useState('');
-  const [seasoning, setSeasoning] = useState<'Sin sazon' | 'Sazonadas' | 'Sazonados'>('Sin sazon');
-  const [dip, setDip] = useState<'Cheddar' | 'Alioli' | 'Barbacoa' | ''>('');
-
   const isBurger = isCategory(product, 'HAMBURGUESAS');
   const isExtra = isCategory(product, 'EXTRAS');
   const productName = normalizeText(product.name);
   const needsSeasoning = productName.includes('PAPAS') || productName.includes('BONIATOS');
   const needsDip = productName.includes('BONIATOS') || productName.includes('NUGGET') || productName.includes('ARO');
   const baseMeatsBySize = { Simple: 1, Doble: 2, Triple: 3 };
+
+  // Only sizes with price > 0 should appear for burgers
+  const availableSizes = useMemo(() => {
+    if (!isBurger) return ['Simple', 'Doble', 'Triple'] as const;
+    const sizes = (['Simple', 'Doble', 'Triple'] as const).filter((option) => {
+      const price = Number(product.variant_prices?.[option] ?? (option === 'Simple' ? product.price : 0));
+      return price > 0;
+    });
+    return sizes.length > 0 ? sizes : (['Simple', 'Doble', 'Triple'] as const);
+  }, [product, isBurger]);
+
+  const [meatSize, setMeatSize] = useState<'Simple' | 'Doble' | 'Triple'>(availableSizes[0]);
+  const [protein, setProtein] = useState<BurgerProtein>('carne');
+  const [extraMeats, setExtraMeats] = useState(0);
+  const [quantity, setQuantity] = useState(1);
+  const [comment, setComment] = useState('');
+  const defaultSeasoning: 'Sin sazon' | 'Sazonadas' | 'Sazonados' =
+    productName.includes('PAPAS') ? 'Sazonadas' : productName.includes('BONIATOS') ? 'Sazonados' : 'Sin sazon';
+  const [seasoning, setSeasoning] = useState<'Sin sazon' | 'Sazonadas' | 'Sazonados'>(defaultSeasoning);
+  const [dip, setDip] = useState<'Cheddar' | 'Alioli' | 'Barbacoa' | ''>('');
+
   const totalMeats = isBurger && protein === 'carne' ? baseMeatsBySize[meatSize] + extraMeats : 0;
 
   function confirm() {
@@ -745,7 +774,7 @@ function ProductConfigModal({
         totalMeats,
         protein,
       };
-      onConfirm(itemConfig, comment.trim() || null, totalMeats);
+      onConfirm(itemConfig, comment.trim() || null, totalMeats, quantity);
       return;
     }
 
@@ -755,7 +784,7 @@ function ProductConfigModal({
         ...(needsSeasoning ? { seasoning } : {}),
         ...(needsDip ? { dip: dip || null } : {}),
       };
-      onConfirm(itemConfig, null, 0);
+      onConfirm(itemConfig, null, 0, quantity);
     }
   }
 
@@ -800,8 +829,8 @@ function ProductConfigModal({
 
             <section>
               <h3 className="mb-2 text-xs font-bold uppercase text-gray-500">Cantidad de carnes</h3>
-              <div className="grid grid-cols-3 gap-2">
-                {(['Simple', 'Doble', 'Triple'] as const).map((option) => (
+              <div className={`grid gap-2 ${availableSizes.length === 1 ? 'grid-cols-1' : availableSizes.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
+                {availableSizes.map((option) => (
                   <button
                     key={option}
                     type="button"
@@ -843,6 +872,27 @@ function ProductConfigModal({
                   </p>
             </section>
             )}
+
+            <section>
+              <h3 className="mb-2 text-xs font-bold uppercase text-gray-500">Cantidad</h3>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-red-200 bg-white text-xl font-black text-gray-800 transition hover:border-red-500 hover:bg-red-50 active:scale-95"
+                >
+                  -
+                </button>
+                <span className="w-10 text-center text-xl font-black text-gray-900">{quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-red-200 bg-white text-xl font-black text-gray-800 transition hover:border-red-500 hover:bg-red-50 active:scale-95"
+                >
+                  +
+                </button>
+              </div>
+            </section>
 
             <label className="block">
               <span className="text-sm font-semibold text-gray-700">Comentario</span>
@@ -897,12 +947,33 @@ function ProductConfigModal({
               </div>
             </section>
             )}
+
+            <section>
+              <h3 className="mb-2 text-xs font-bold uppercase text-gray-500">Cantidad</h3>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => Math.max(1, q - 1))}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-red-200 bg-white text-xl font-black text-gray-800 transition hover:border-red-500 hover:bg-red-50 active:scale-95"
+                >
+                  -
+                </button>
+                <span className="w-10 text-center text-xl font-black text-gray-900">{quantity}</span>
+                <button
+                  type="button"
+                  onClick={() => setQuantity((q) => q + 1)}
+                  className="flex h-11 w-11 items-center justify-center rounded-xl border-2 border-red-200 bg-white text-xl font-black text-gray-800 transition hover:border-red-500 hover:bg-red-50 active:scale-95"
+                >
+                  +
+                </button>
+              </div>
+            </section>
           </div>
         )}
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button type="button" onClick={confirm} className="btn-primary">
-            Agregar al pedido
+            Agregar al pedido {quantity > 1 ? `(${quantity})` : ''}
           </button>
           <button type="button" onClick={onCancel} className="btn-secondary">
             Cancelar

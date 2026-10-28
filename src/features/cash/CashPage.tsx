@@ -27,7 +27,15 @@ export type SoldProductsSummary = {
   bebidas: number;
 };
 
-function calculateSoldProducts(orders: OrderWithItems[]): SoldProductsSummary {
+export type ProductMeta = {
+  name: string;
+  categoryName: string;
+};
+
+function calculateSoldProducts(
+  orders: OrderWithItems[],
+  productMetaById?: Map<string, ProductMeta>
+): SoldProductsSummary {
   const summary: SoldProductsSummary = {
     burgers: 0,
     dips: 0,
@@ -42,31 +50,22 @@ function calculateSoldProducts(orders: OrderWithItems[]): SoldProductsSummary {
     if (order.status === 'cancelled') continue;
     for (const item of order.order_items ?? []) {
       const q = Number(item.quantity) || 0;
-      const name = (item.product_name_snapshot ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const snapshotName = (item.product_name_snapshot ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const meta = item.product_id ? productMetaById?.get(item.product_id) : null;
+      const catalogName = (meta?.name ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+      const catName = (meta?.categoryName ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
       const config = item.item_config as OrderItemConfig | null;
 
-      if (
-        config?.kind === 'burger' ||
-        name.includes('CHEESE') ||
-        name.includes('BURGER') ||
-        name.includes('CRIOLLA') ||
-        name.includes('BBQ') ||
-        name.includes('BACON') ||
-        name.includes('DE LA SEMANA')
-      ) {
-        summary.burgers += q;
-      } else if (config?.kind === 'dip' || name.includes('DIP')) {
-        summary.dips += q;
-      } else if (name.includes('BONIATO')) {
-        summary.boniatos += q;
-      } else if (name.includes('PAPA')) {
-        summary.papas += q;
-      } else if (name.includes('NUGGET')) {
-        summary.nuggets += q;
-      } else if (name.includes('ARO')) {
-        summary.aros += q;
-      } else if (
+      const name = `${snapshotName} ${catalogName}`.trim();
+
+      const isBebida =
         config?.kind === 'beverage' ||
+        catName.includes('BEBIDA') ||
+        catName.includes('GASEOSA') ||
+        catName.includes('CERVEZA') ||
+        catName.includes('TRAGO') ||
+        catName.includes('REFRESCO') ||
+        catName.includes('DRINK') ||
         name.includes('GASEOSA') ||
         name.includes('AGUA') ||
         name.includes('MILLER') ||
@@ -75,10 +74,98 @@ function calculateSoldProducts(orders: OrderWithItems[]): SoldProductsSummary {
         name.includes('COCA') ||
         name.includes('SPRITE') ||
         name.includes('FANTA') ||
-        name.includes('CERVEZA')
-      ) {
+        name.includes('CERVEZA') ||
+        name.includes('PEPSI') ||
+        name.includes('7UP') ||
+        name.includes('7 UP') ||
+        name.includes('SEVEN UP') ||
+        name.includes('PASO DE LOS TOROS') ||
+        name.includes('AQUARIUS') ||
+        name.includes('LEVITE') ||
+        name.includes('POMELO') ||
+        name.includes('CORONA') ||
+        name.includes('STELLA') ||
+        name.includes('PATAGONIA') ||
+        name.includes('ANDES') ||
+        name.includes('QUILMES') ||
+        name.includes('BRAHMA') ||
+        name.includes('SCHNEIDER') ||
+        name.includes('IMPERIAL') ||
+        name.includes('LATA') ||
+        name.includes('BOTELLA') ||
+        name.includes('LIMONADA') ||
+        name.includes('JUGO') ||
+        name.includes('SODA') ||
+        name.includes('SPEED') ||
+        name.includes('MONSTER') ||
+        name.includes('RED BULL') ||
+        name.includes('FERNET') ||
+        name.includes('GIN') ||
+        name.includes('VINO') ||
+        name.includes('BEBIDA');
+
+      const isNugget =
+        name.includes('NUGGET') ||
+        name.includes('PATITA') ||
+        catName.includes('NUGGET');
+
+      const isAro =
+        name.includes('ARO') ||
+        name.includes('ONION RING') ||
+        catName.includes('ARO');
+
+      const isBoniato =
+        name.includes('BONIATO') ||
+        name.includes('BATATA') ||
+        catName.includes('BONIATO') ||
+        catName.includes('BATATA') ||
+        (config?.kind === 'extra' && config.seasoning === 'Sazonados');
+
+      const isPapa =
+        name.includes('PAPA') ||
+        name.includes('FRIES') ||
+        catName.includes('PAPA') ||
+        (config?.kind === 'extra' && config.seasoning === 'Sazonadas');
+
+      const isDip =
+        config?.kind === 'dip' ||
+        catName.includes('DIP') ||
+        catName.includes('SALSA') ||
+        name.includes('DIP') ||
+        (name.includes('SALSA') && !name.includes('BURGER')) ||
+        (name.includes('ALIOLI') && !name.includes('BURGER')) ||
+        (name.includes('BARBACOA') && !name.includes('BURGER') && !name.includes('BBQ'));
+
+      const isBurger =
+        config?.kind === 'burger' ||
+        catName.includes('HAMBURGUESA') ||
+        catName.includes('BURGER') ||
+        name.includes('CHEESE') ||
+        name.includes('BURGER') ||
+        name.includes('HAMBURGUESA') ||
+        name.includes('CRIOLLA') ||
+        name.includes('BBQ') ||
+        name.includes('BACON') ||
+        name.includes('DE LA SEMANA') ||
+        name.includes('CARNE') ||
+        name.includes('MEDALLON') ||
+        name.includes('SMASH');
+
+      if (config?.kind === 'burger') {
+        summary.burgers += q;
+      } else if (isNugget) {
+        summary.nuggets += q;
+      } else if (isAro) {
+        summary.aros += q;
+      } else if (isBoniato) {
+        summary.boniatos += q;
+      } else if (isPapa) {
+        summary.papas += q;
+      } else if (isBebida) {
         summary.bebidas += q;
-      } else if (name.includes('CARNE')) {
+      } else if (isDip) {
+        summary.dips += q;
+      } else if (isBurger) {
         summary.burgers += q;
       }
     }
@@ -91,23 +178,41 @@ async function fetchSoldProductsForRegister(reg: CashRegister): Promise<SoldProd
   const regOpen = reg.opened_at;
   const regClose = reg.closed_at || new Date().toISOString();
 
-  let { data: regOrders } = await supabase
-    .from('orders')
-    .select('*, order_items(*, order_item_modifiers(*))')
-    .eq('register_id', reg.id)
-    .neq('status', 'cancelled');
-
-  if (!regOrders || regOrders.length === 0) {
-    const { data: fallbackOrders } = await supabase
+  const [ordersRes, fallbackOrdersRes, productsRes, categoriesRes] = await Promise.all([
+    supabase
+      .from('orders')
+      .select('*, order_items(*, order_item_modifiers(*))')
+      .eq('register_id', reg.id)
+      .neq('status', 'cancelled'),
+    supabase
       .from('orders')
       .select('*, order_items(*, order_item_modifiers(*))')
       .gte('created_at', regOpen)
       .lte('created_at', regClose)
-      .neq('status', 'cancelled');
-    regOrders = fallbackOrders;
+      .neq('status', 'cancelled'),
+    supabase.from('products').select('id, name, category_id'),
+    supabase.from('categories').select('id, name'),
+  ]);
+
+  let regOrders = ordersRes.data;
+  if (!regOrders || regOrders.length === 0) {
+    regOrders = fallbackOrdersRes.data;
   }
 
-  return calculateSoldProducts((regOrders ?? []) as OrderWithItems[]);
+  const categoryNameById = new Map<string, string>();
+  for (const cat of (categoriesRes.data ?? []) as { id: string; name: string }[]) {
+    categoryNameById.set(cat.id, cat.name);
+  }
+
+  const productMetaById = new Map<string, ProductMeta>();
+  for (const prod of (productsRes.data ?? []) as { id: string; name: string; category_id: string | null }[]) {
+    productMetaById.set(prod.id, {
+      name: prod.name,
+      categoryName: prod.category_id ? categoryNameById.get(prod.category_id) ?? '' : '',
+    });
+  }
+
+  return calculateSoldProducts((regOrders ?? []) as OrderWithItems[], productMetaById);
 }
 
 const moneyFormatter = new Intl.NumberFormat('es-AR', {

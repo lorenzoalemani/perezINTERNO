@@ -91,17 +91,50 @@ function isCategory(product: ProductWithCategory, categoryName: string) {
 
 function requiresProductConfig(product: ProductWithCategory) {
   const name = normalizeText(product.name);
-  return isCategory(product, 'HAMBURGUESAS') || name.includes('PAPAS') || name.includes('BONIATOS') || name.includes('NUGGET') || name.includes('ARO');
+  const cat = normalizeText(product.category_name);
+  return (
+    isCategory(product, 'HAMBURGUESAS') ||
+    cat.includes('BURGER') ||
+    cat.includes('HAMBURGUESA') ||
+    name.includes('PAPA') ||
+    name.includes('BONIATO') ||
+    name.includes('BATATA') ||
+    name.includes('NUGGET') ||
+    name.includes('ARO')
+  );
 }
 
 function defaultItemConfig(product: ProductWithCategory): OrderItemConfig {
-  if (isCategory(product, 'DIPS')) return { kind: 'dip' };
-  if (isCategory(product, 'BEBIDAS')) return { kind: 'beverage' };
+  const cat = normalizeText(product.category_name);
   const name = normalizeText(product.name);
-  if (name.includes('PAPA') || name.includes('BONIATO')) {
+
+  if (cat === 'DIPS' || cat.includes('DIP') || cat.includes('SALSA') || name.includes('DIP')) {
+    return { kind: 'dip' };
+  }
+  if (
+    cat === 'BEBIDAS' ||
+    cat.includes('BEBIDA') ||
+    cat.includes('GASEOSA') ||
+    cat.includes('CERVEZA') ||
+    cat.includes('TRAGO') ||
+    cat.includes('REFRESCO')
+  ) {
+    return { kind: 'beverage' };
+  }
+  if (
+    name.includes('PAPA') ||
+    name.includes('BONIATO') ||
+    name.includes('BATATA') ||
+    name.includes('NUGGET') ||
+    name.includes('ARO') ||
+    cat === 'EXTRAS' ||
+    cat.includes('EXTRA') ||
+    cat.includes('GUARNICION') ||
+    cat.includes('ACOMPAN')
+  ) {
     return {
       kind: 'extra',
-      seasoning: name.includes('PAPA') ? 'Sazonadas' : 'Sazonados',
+      seasoning: name.includes('PAPA') ? 'Sazonadas' : (name.includes('BONIATO') || name.includes('BATATA')) ? 'Sazonados' : undefined,
     };
   }
   return { kind: 'plain' };
@@ -735,11 +768,11 @@ function ProductConfigModal({
   onCancel: () => void;
   onConfirm: (itemConfig: OrderItemConfig, itemComment: string | null, capacityUnits: number, quantity: number) => void;
 }) {
-  const isBurger = isCategory(product, 'HAMBURGUESAS');
-  const isExtra = isCategory(product, 'EXTRAS');
+  const isBurger = isCategory(product, 'HAMBURGUESAS') || normalizeText(product.category_name).includes('BURGER') || normalizeText(product.category_name).includes('HAMBURGUESA');
+  const isExtra = !isBurger;
   const productName = normalizeText(product.name);
-  const needsSeasoning = productName.includes('PAPAS') || productName.includes('BONIATOS');
-  const needsDip = productName.includes('BONIATOS') || productName.includes('NUGGET') || productName.includes('ARO');
+  const needsSeasoning = productName.includes('PAPA') || productName.includes('BONIATO') || productName.includes('BATATA');
+  const needsDip = productName.includes('BONIATO') || productName.includes('BATATA') || productName.includes('NUGGET') || productName.includes('ARO');
   const baseMeatsBySize = { Simple: 1, Doble: 2, Triple: 3 };
 
   // Only sizes with price > 0 should appear for burgers
@@ -758,7 +791,7 @@ function ProductConfigModal({
   const [quantity, setQuantity] = useState(1);
   const [comment, setComment] = useState('');
   const defaultSeasoning: 'Sin sazon' | 'Sazonadas' | 'Sazonados' =
-    productName.includes('PAPAS') ? 'Sazonadas' : productName.includes('BONIATOS') ? 'Sazonados' : 'Sin sazon';
+    productName.includes('PAPA') ? 'Sazonadas' : (productName.includes('BONIATO') || productName.includes('BATATA')) ? 'Sazonados' : 'Sin sazon';
   const [seasoning, setSeasoning] = useState<'Sin sazon' | 'Sazonadas' | 'Sazonados'>(defaultSeasoning);
   const [dip, setDip] = useState<'Cheddar' | 'Alioli' | 'Barbacoa' | ''>('');
 

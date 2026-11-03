@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import type { BurgerProtein, Category, Modifier, NewOrderItemPayload, OrderItemConfig, Product } from '../../types/database';
 import { PICKUP_TIME_OPTIONS } from './orderSchedule';
@@ -194,6 +194,8 @@ function getCartItemConfigLines(item: CartItem) {
 
 export default function NewOrderPage() {
   const navigate = useNavigate();
+  const { orderId: editOrderId } = useParams<{ orderId: string }>();
+  const isEditMode = Boolean(editOrderId);
   const [searchParams] = useSearchParams();
   const requestedPickup = searchParams.get('pickup');
   const pickupOptions = PICKUP_TIME_OPTIONS;
@@ -215,6 +217,7 @@ export default function NewOrderPage() {
   const [modifierProduct, setModifierProduct] = useState<ProductWithCategory | null>(null);
   const [selectedModifierIds, setSelectedModifierIds] = useState<string[]>([]);
   const [configProduct, setConfigProduct] = useState<ProductWithCategory | null>(null);
+  const [editingCartItem, setEditingCartItem] = useState<CartItem | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const [hasOpenRegister, setHasOpenRegister] = useState<boolean | null>(null);
 
@@ -235,7 +238,8 @@ export default function NewOrderPage() {
     ]);
 
     const openRegs = (registerResult.data as { id: string }[] | null) ?? [];
-    setHasOpenRegister(openRegs.length > 0);
+    // In edit mode we don't require an open register
+    setHasOpenRegister(isEditMode ? true : openRegs.length > 0);
 
     const error = categoriesResult.error ?? productsResult.error ?? modifiersResult.error ?? linksResult.error;
     if (error) {
@@ -253,22 +257,115 @@ export default function NewOrderPage() {
     setCategories(categoryRows);
     setModifiers((modifiersResult.data ?? []) as Modifier[]);
     setLinks((linksResult.data ?? []) as ProductModifierLink[]);
-    setProducts(
-      ((productsResult.data ?? []) as Product[])
-        .map((product) => ({
-          ...product,
-          category_name: product.category_id
-            ? categoryNameById.get(product.category_id) ?? 'Sin categoria'
-            : 'Sin categoria',
-        }))
-    );
+
+    const allProducts = ((productsResult.data ?? []) as Product[]).map((product) => ({
+      ...product,
+      category_name: product.category_id
+        ? categoryNameById.get(product.category_id) ?? 'Sin categoria'
+        : 'Sin categoria',
+    }));
+    setProducts(allProducts);
 
     // Auto-select the first category (Hamburguesas) instead of 'all'
     if (categoryRows.length > 0) {
       setSelectedCategory(categoryRows[0].id);
     }
 
+    // If editing, load the existing order and populate cart/customer
+    if (isEditMode && editOrderId) {
+      const modifiersMap = new Map((modifiersResult.data ?? [] as Modifier[]).map((m: Modifier) => [m.id, m]));
+      const productsMap = new Map(allProducts.map((p) => [p.id, p]));
+      await loadExistingOrder(editOrderId, productsMap, modifiersMap);
+    }
+
     setLoading(false);
+  }
+
+  async function loadExistingOrder(
+    orderId: string,
+    productsMap: Map<string, ProductWithCategory>,
+    modifiersMap: Map<string, Modifier>
+  ) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*, order_items(*, order_item_modifiers(*))')
+      .eq('id', orderId)
+      .single();
+
+    if (error || !data) {
+      setMessage({ type: 'error', text: 'No se pudo cargar el pedido a editar.' });
+      return;
+    }
+
+    const order = data as any;
+
+    // Populate customer form
+    const pickupIso = order.pickup_time as string | null;
+    let pickupTime = '';
+    if (pickupIso) {
+      const d = new Date(pickupIso);
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mm = String(d.getMinutes()).padStart(2, '0');
+      const candidate = `${hh}:${mm}`;
+      pickupTime = PICKUP_TIME_OPTIONS.includes(candidate) ? candidate : PICKUP_TIME_OPTIONS[0];
+    }
+    setCustomer({
+      lastName: order.customer_name ?? '',
+      pickupTime,
+      notes: order.notes ?? '',
+    });
+
+    // Rebuild cart from order items
+    const loadedCart: CartItem[] = [];
+    for (const item of (order.order_items ?? []) as any[]) {
+      const product = item.product_id ? productsMap.get(item.product_id) : null;
+      // Build a synthetic product if not found in catalog (deleted or inactive)
+      const cartProduct: ProductWithCategory = product ?? {
+        id: item.product_id ?? crypto.randomUUID(),
+        name: item.product_name_snapshot,
+        price: item.unit_price_snapshot,
+        category_id: null,
+        category_name: 'Sin categoria',
+        active: false,
+        description: null,
+        image_url: null,
+        sort_order: 0,
+        variant_prices: {},
+        created_at: '',
+        updated_at: '',
+      };
+
+      const itemModifiers = ((item.order_item_modifiers ?? []) as any[])
+        .map((oim: any) => {
+          const mod = oim.modifier_id ? modifiersMap.get(oim.modifier_id) : null;
+          return mod ?? {
+            id: oim.modifier_id ?? crypto.randomUUID(),
+            name: oim.name_snapshot,
+            price: oim.price_snapshot,
+            type: oim.type_snapshot,
+            active: false,
+            sort_order: 0,
+            created_at: '',
+            updated_at: '',
+          };
+        });
+
+      const itemConfig = (item.item_config as OrderItemConfig) ?? defaultItemConfig(cartProduct);
+      const modIds = itemModifiers.map((m: Modifier) => m.id);
+      const key = cartKey(cartProduct.id, modIds, itemConfig, item.item_comment ?? null);
+
+      loadedCart.push({
+        key,
+        product: cartProduct,
+        quantity: Number(item.quantity),
+        modifiers: itemModifiers,
+        itemConfig,
+        itemComment: item.item_comment ?? null,
+        capacityUnits: Number(item.capacity_units ?? 0),
+        unitPrice: Number(item.unit_price_snapshot),
+      });
+    }
+    setCart(loadedCart);
   }
 
   const modifiersById = useMemo(
@@ -375,6 +472,42 @@ export default function NewOrderPage() {
     return true;
   }
 
+  function startEditCartItem(item: CartItem) {
+    setEditingCartItem(item);
+    setConfigProduct(item.product);
+  }
+
+  function updateConfiguredCartItem(
+    originalKey: string,
+    newConfig: OrderItemConfig,
+    newComment: string | null,
+    capacityUnits: number,
+    newQuantity: number
+  ) {
+    setCart((currentCart) => {
+      return currentCart.map((item) => {
+        if (item.key !== originalKey) return item;
+        const newKey = cartKey(
+          item.product.id,
+          item.modifiers.map((m) => m.id),
+          newConfig,
+          newComment
+        );
+        return {
+          ...item,
+          key: newKey,
+          itemConfig: newConfig,
+          itemComment: newComment,
+          capacityUnits,
+          quantity: newQuantity,
+          unitPrice: getConfiguredUnitPrice(item.product, newConfig),
+        };
+      });
+    });
+    setEditingCartItem(null);
+    setConfigProduct(null);
+  }
+
   function openReview(event: FormEvent) {
     event.preventDefault();
     setMessage(null);
@@ -387,23 +520,6 @@ export default function NewOrderPage() {
 
     setSaving(true);
     setMessage(null);
-
-    // Validar que exista una caja abierta antes de guardar
-    const { data: openRegisters } = await supabase
-      .from('cash_registers')
-      .select('id')
-      .is('closed_at', null)
-      .limit(1);
-
-    if (!openRegisters || openRegisters.length === 0) {
-      setHasOpenRegister(false);
-      setSaving(false);
-      setMessage({
-        type: 'error',
-        text: 'No se puede cargar el pedido: no hay ninguna caja abierta. Primero debes abrir una caja.',
-      });
-      return;
-    }
 
     const payload: NewOrderItemPayload[] = cart.map((item) => ({
       product_id: item.product.id,
@@ -422,6 +538,53 @@ export default function NewOrderPage() {
     }));
 
     const customerName = customer.lastName.trim() || 'Sin nombre';
+
+    // ── EDIT MODE ──
+    if (isEditMode && editOrderId) {
+      const { data, error } = await supabase.rpc('update_order', {
+        p_order_id: editOrderId,
+        p_customer_name: customerName,
+        p_pickup_time: toPickupDateTime(customer.pickupTime),
+        p_notes: customer.notes.trim() || null,
+        p_items: payload,
+      });
+
+      setSaving(false);
+
+      if (error || !data) {
+        setMessage({
+          type: 'error',
+          text: `No se pudo actualizar el pedido: ${error?.message ?? 'Respuesta vacía del servidor'}.`,
+        });
+        return;
+      }
+
+      const order = data as { order_number: number };
+      navigate('/', {
+        state: {
+          message: `Pedido #${order.order_number} actualizado correctamente.`,
+        },
+      });
+      return;
+    }
+
+    // ── CREATE MODE ──
+    // Validar que exista una caja abierta antes de guardar
+    const { data: openRegisters } = await supabase
+      .from('cash_registers')
+      .select('id')
+      .is('closed_at', null)
+      .limit(1);
+
+    if (!openRegisters || openRegisters.length === 0) {
+      setHasOpenRegister(false);
+      setSaving(false);
+      setMessage({
+        type: 'error',
+        text: 'No se puede cargar el pedido: no hay ninguna caja abierta. Primero debes abrir una caja.',
+      });
+      return;
+    }
 
     const { data, error } = await supabase.rpc('create_order', {
       p_customer_name: customerName,
@@ -465,8 +628,8 @@ export default function NewOrderPage() {
       <div className="new-order-header">
         <div>
           <p className="new-order-eyebrow">Pedidos</p>
-          <h1>Nueva comanda</h1>
-          <p>Seleccioná el menú y completá los datos de retiro.</p>
+          <h1>{isEditMode ? 'Editar comanda' : 'Nueva comanda'}</h1>
+          <p>{isEditMode ? 'Modificá los productos, cantidades o datos del pedido.' : 'Seleccioná el menú y completá los datos de retiro.'}</p>
         </div>
         <div className="new-order-summary">
           <span>{itemCount} {itemCount === 1 ? 'ítem' : 'ítems'}</span>
@@ -606,13 +769,22 @@ export default function NewOrderPage() {
                             {item.unitPrice > 0 ? `${formatMoney(item.unitPrice)} unidad` : 'Precio pendiente'}
                           </p>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => removeItem(item.key)}
-                          className="new-order-remove"
-                        >
-                          Eliminar
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEditCartItem(item)}
+                            className="rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-bold text-blue-700 hover:bg-blue-100"
+                          >
+                            Editar
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeItem(item.key)}
+                            className="new-order-remove"
+                          >
+                            Eliminar
+                          </button>
+                        </div>
                       </div>
 
                       {item.modifiers.length > 0 && (
@@ -738,10 +910,21 @@ export default function NewOrderPage() {
       {configProduct && (
         <ProductConfigModal
           product={configProduct}
-          onCancel={() => setConfigProduct(null)}
-          onConfirm={(itemConfig, itemComment, capacityUnits, quantity) =>
-            addConfiguredProduct(configProduct, [], itemConfig, itemComment, capacityUnits, quantity)
-          }
+          initialConfig={editingCartItem?.itemConfig}
+          initialComment={editingCartItem?.itemComment}
+          initialQuantity={editingCartItem?.quantity}
+          isEditing={Boolean(editingCartItem)}
+          onCancel={() => {
+            setConfigProduct(null);
+            setEditingCartItem(null);
+          }}
+          onConfirm={(itemConfig, itemComment, capacityUnits, quantity) => {
+            if (editingCartItem) {
+              updateConfiguredCartItem(editingCartItem.key, itemConfig, itemComment, capacityUnits, quantity);
+            } else {
+              addConfiguredProduct(configProduct, [], itemConfig, itemComment, capacityUnits, quantity);
+            }
+          }}
         />
       )}
 
@@ -751,6 +934,7 @@ export default function NewOrderPage() {
           customer={customer}
           total={total}
           saving={saving}
+          isEditMode={isEditMode}
           onCancel={() => setReviewOpen(false)}
           onConfirm={confirmOrder}
         />
@@ -761,10 +945,18 @@ export default function NewOrderPage() {
 
 function ProductConfigModal({
   product,
+  initialConfig,
+  initialComment,
+  initialQuantity,
+  isEditing = false,
   onCancel,
   onConfirm,
 }: {
   product: ProductWithCategory;
+  initialConfig?: OrderItemConfig | null;
+  initialComment?: string | null;
+  initialQuantity?: number;
+  isEditing?: boolean;
   onCancel: () => void;
   onConfirm: (itemConfig: OrderItemConfig, itemComment: string | null, capacityUnits: number, quantity: number) => void;
 }) {
@@ -785,15 +977,26 @@ function ProductConfigModal({
     return sizes.length > 0 ? sizes : (['Simple', 'Doble', 'Triple'] as const);
   }, [product, isBurger]);
 
-  const [meatSize, setMeatSize] = useState<'Simple' | 'Doble' | 'Triple'>(availableSizes[0]);
-  const [protein, setProtein] = useState<BurgerProtein>('carne');
-  const [extraMeats, setExtraMeats] = useState(0);
-  const [quantity, setQuantity] = useState(1);
-  const [comment, setComment] = useState('');
+  const initialBurgerConfig = initialConfig?.kind === 'burger' ? initialConfig : null;
+  const initialExtraConfig = initialConfig?.kind === 'extra' ? initialConfig : null;
+
+  const [meatSize, setMeatSize] = useState<'Simple' | 'Doble' | 'Triple'>(
+    initialBurgerConfig?.meatSize && availableSizes.includes(initialBurgerConfig.meatSize)
+      ? initialBurgerConfig.meatSize
+      : availableSizes[0]
+  );
+  const [protein, setProtein] = useState<BurgerProtein>(initialBurgerConfig?.protein ?? 'carne');
+  const [extraMeats, setExtraMeats] = useState(initialBurgerConfig?.extraMeats ?? 0);
+  const [quantity, setQuantity] = useState(initialQuantity ?? 1);
+  const [comment, setComment] = useState(initialComment ?? '');
   const defaultSeasoning: 'Sin sazon' | 'Sazonadas' | 'Sazonados' =
     productName.includes('PAPA') ? 'Sazonadas' : (productName.includes('BONIATO') || productName.includes('BATATA')) ? 'Sazonados' : 'Sin sazon';
-  const [seasoning, setSeasoning] = useState<'Sin sazon' | 'Sazonadas' | 'Sazonados'>(defaultSeasoning);
-  const [dip, setDip] = useState<'Cheddar' | 'Alioli' | 'Barbacoa' | ''>('');
+  const [seasoning, setSeasoning] = useState<'Sin sazon' | 'Sazonadas' | 'Sazonados'>(
+    initialExtraConfig?.seasoning ?? defaultSeasoning
+  );
+  const [dip, setDip] = useState<'Cheddar' | 'Alioli' | 'Barbacoa' | ''>(
+    initialExtraConfig?.dip ?? ''
+  );
 
   const totalMeats = isBurger && protein === 'carne' ? baseMeatsBySize[meatSize] + extraMeats : 0;
 
@@ -817,7 +1020,7 @@ function ProductConfigModal({
         ...(needsSeasoning ? { seasoning } : {}),
         ...(needsDip ? { dip: dip || null } : {}),
       };
-      onConfirm(itemConfig, null, 0, quantity);
+      onConfirm(itemConfig, comment.trim() || null, 0, quantity);
     }
   }
 
@@ -1001,12 +1204,22 @@ function ProductConfigModal({
                 </button>
               </div>
             </section>
+
+            <label className="block">
+              <span className="text-sm font-semibold text-gray-700">Comentario</span>
+              <input
+                value={comment}
+                onChange={(event) => setComment(event.target.value)}
+                className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-3"
+                placeholder="sin sal, bien crocantes..."
+              />
+            </label>
           </div>
         )}
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button type="button" onClick={confirm} className="btn-primary">
-            Agregar al pedido {quantity > 1 ? `(${quantity})` : ''}
+            {isEditing ? 'Guardar cambios' : `Agregar al pedido ${quantity > 1 ? `(${quantity})` : ''}`}
           </button>
           <button type="button" onClick={onCancel} className="btn-secondary">
             Cancelar
@@ -1110,6 +1323,7 @@ function ReviewModal({
   customer,
   total,
   saving,
+  isEditMode = false,
   onCancel,
   onConfirm,
 }: {
@@ -1117,13 +1331,14 @@ function ReviewModal({
   customer: CustomerForm;
   total: number;
   saving: boolean;
+  isEditMode?: boolean;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
   return (
     <div className="fixed inset-0 z-40 flex items-end justify-center bg-black/40 p-3 sm:items-center">
       <div className="perez-modal max-h-[90vh] w-full max-w-2xl overflow-y-auto">
-        <h2 className="text-xl font-bold">Revisar pedido</h2>
+        <h2 className="text-xl font-bold">{isEditMode ? 'Revisar cambios' : 'Revisar pedido'}</h2>
         <p className="mt-1 text-sm text-gray-500">
           {customer.lastName.trim() || 'Sin nombre'} - Retiro: {customer.pickupTime}
         </p>
@@ -1144,7 +1359,7 @@ function ReviewModal({
 
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
           <button type="button" onClick={onConfirm} disabled={saving} className="btn-primary">
-            {saving ? 'Guardando...' : 'Confirmar pedido'}
+            {saving ? 'Guardando...' : isEditMode ? 'Guardar cambios' : 'Confirmar pedido'}
           </button>
           <button type="button" onClick={onCancel} disabled={saving} className="btn-secondary">
             Seguir editando

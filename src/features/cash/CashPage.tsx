@@ -345,18 +345,31 @@ export default function CashPage() {
     const currentRegister = openRegister ?? (registers.length > 0 ? registers[0] : null);
     setRegister(currentRegister);
 
-    const allPayments: Payment[] = [];
+    const allPaymentsMap = new Map<string, Payment>();
     if (currentRegister) {
       const regOpen = currentRegister.opened_at;
       const regClose = currentRegister.closed_at || new Date().toISOString();
-      const { data: regPayments } = await supabase
-        .from('payments')
-        .select('*')
-        .gte('created_at', regOpen)
-        .lte('created_at', regClose);
-      allPayments.push(...((regPayments ?? []) as Payment[]));
+      const [regPaymentsRes, regOrdersRes] = await Promise.all([
+        supabase
+          .from('payments')
+          .select('*')
+          .gte('created_at', regOpen)
+          .lte('created_at', regClose),
+        supabase
+          .from('orders')
+          .select('id, payments(*)')
+          .eq('register_id', currentRegister.id),
+      ]);
+      for (const p of (regPaymentsRes.data ?? []) as Payment[]) {
+        allPaymentsMap.set(p.id, p);
+      }
+      for (const o of (regOrdersRes.data ?? []) as any[]) {
+        for (const p of (o.payments ?? []) as Payment[]) {
+          allPaymentsMap.set(p.id, p);
+        }
+      }
     }
-    setPayments(allPayments);
+    setPayments(Array.from(allPaymentsMap.values()));
 
     if (currentRegister) {
       const { data, error } = await supabase
@@ -396,17 +409,33 @@ export default function CashPage() {
       registers.map(async (cashRegister) => {
         const regOpen = cashRegister.opened_at;
         const regClose = cashRegister.closed_at || new Date().toISOString();
-        const [paymentsResult, movementsResult] = await Promise.all([
+        const [paymentsResult, movementsResult, regOrdersRes] = await Promise.all([
           supabase
             .from('payments')
             .select('*')
             .gte('created_at', regOpen)
             .lte('created_at', regClose),
           supabase.from('cash_movements').select('*').eq('register_id', cashRegister.id),
+          supabase
+            .from('orders')
+            .select('id, payments(*)')
+            .eq('register_id', cashRegister.id),
         ]);
+
+        const allPaymentsMap = new Map<string, Payment>();
+        for (const p of (paymentsResult.data ?? []) as Payment[]) {
+          allPaymentsMap.set(p.id, p);
+        }
+        for (const o of (regOrdersRes.data ?? []) as any[]) {
+          for (const p of (o.payments ?? []) as Payment[]) {
+            allPaymentsMap.set(p.id, p);
+          }
+        }
+        const combinedPayments = Array.from(allPaymentsMap.values());
+
         return calculateSummary(
           cashRegister,
-          (paymentsResult.data ?? []) as Payment[],
+          combinedPayments,
           (movementsResult.data ?? []) as CashMovement[]
         );
       })
@@ -416,6 +445,7 @@ export default function CashPage() {
 
   const [editingRegister, setEditingRegister] = useState<RegisterSummary | null>(null);
   const [editClosingAmount, setEditClosingAmount] = useState('');
+  const [editOpeningAmount, setEditOpeningAmount] = useState('');
 
   async function openRegister(event: FormEvent) {
     event.preventDefault();
@@ -476,6 +506,9 @@ export default function CashPage() {
     setEditClosingAmount(
       summaryItem.register.closing_amount !== null ? String(summaryItem.register.closing_amount) : ''
     );
+    setEditOpeningAmount(
+      summaryItem.register.opening_amount !== null ? String(summaryItem.register.opening_amount) : ''
+    );
   }
 
   async function saveEditRegister(event: FormEvent) {
@@ -488,21 +521,65 @@ export default function CashPage() {
       return;
     }
 
-    const difference = counted - editingRegister.expectedCash;
+    const opening = editOpeningAmount.trim() !== '' ? parseAmount(editOpeningAmount) : Number(editingRegister.register.opening_amount ?? 0);
+    const expectedCashWithOpening = editingRegister.expectedCash - Number(editingRegister.register.opening_amount ?? 0) + opening;
+    const difference = counted - expectedCashWithOpening;
 
     setSaving(true);
-    const { error } = await supabase
-      .from('cash_registers')
-      .update({
+    setMessage(null);
+
+    // 1. Intentar RPC SECURITY DEFINER para saltar cualquier restricción de RLS
+    let saved = false;
+    const rpcRes = await supabase.rpc('update_closed_cash_register', {
+      p_register_id: editingRegister.register.id,
+      p_closing_amount: counted,
+      p_difference: difference,
+    });
+
+    if (!rpcRes.error) {
+      saved = true;
+      if (opening !== Number(editingRegister.register.opening_amount)) {
+        await supabase.from('cash_registers').update({ opening_amount: opening }).eq('id', editingRegister.register.id);
+      }
+    } else {
+      // 2. Si la función RPC no existe aún, intentar actualización directa con select() para verificar
+      const updatePayload: Record<string, any> = {
         closing_amount: counted,
         closing_difference_amount: difference,
-      })
-      .eq('id', editingRegister.register.id);
+        opening_amount: opening,
+      };
+
+      let updateRes = await supabase
+        .from('cash_registers')
+        .update(updatePayload)
+        .eq('id', editingRegister.register.id)
+        .select();
+
+      if (updateRes.error && updateRes.error.message.includes('closing_difference_amount')) {
+        delete updatePayload.closing_difference_amount;
+        updateRes = await supabase
+          .from('cash_registers')
+          .update(updatePayload)
+          .eq('id', editingRegister.register.id)
+          .select();
+      }
+
+      if (!updateRes.error && updateRes.data && updateRes.data.length > 0) {
+        saved = true;
+      } else if (updateRes.error) {
+        setSaving(false);
+        setMessage({ type: 'error', text: `No se pudo actualizar la caja: ${updateRes.error.message}` });
+        return;
+      }
+    }
 
     setSaving(false);
 
-    if (error) {
-      setMessage({ type: 'error', text: `No se pudo actualizar la caja: ${error.message}` });
+    if (!saved) {
+      setMessage({
+        type: 'error',
+        text: 'No se pudo guardar: la base de datos bloqueó la edición por políticas de seguridad (RLS). Ejecuta la migración 0011 en Supabase para habilitarlo.',
+      });
       return;
     }
 
@@ -1003,6 +1080,20 @@ export default function CashPage() {
             <form onSubmit={saveEditRegister} className="mt-4 space-y-4">
               <div>
                 <label className="block text-sm font-semibold text-gray-700">
+                  Monto inicial (apertura)
+                </label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={editOpeningAmount}
+                  onChange={(e) => setEditOpeningAmount(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-base font-bold"
+                  placeholder="0"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-semibold text-gray-700">
                   Efectivo contado al cierre
                 </label>
                 <input
@@ -1017,17 +1108,42 @@ export default function CashPage() {
               </div>
 
               {Number.isFinite(parseAmount(editClosingAmount)) && (
-                <div className="rounded-lg bg-gray-50 p-3 text-sm">
-                  <span className="text-gray-500">Nueva diferencia estimada: </span>
-                  <span
-                    className={`font-bold ${
-                      parseAmount(editClosingAmount) - editingRegister.expectedCash < 0
-                        ? 'text-red-600'
-                        : 'text-green-600'
-                    }`}
-                  >
-                    {formatMoney(parseAmount(editClosingAmount) - editingRegister.expectedCash)}
-                  </span>
+                <div className="rounded-lg bg-gray-50 p-3 text-sm space-y-1">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Ventas efectivo:</span>
+                    <span className="font-semibold">{formatMoney(editingRegister.cashSales)}</span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Efectivo esperado recalculado:</span>
+                    <span className="font-semibold">
+                      {formatMoney(
+                        editingRegister.expectedCash -
+                          Number(editingRegister.register.opening_amount ?? 0) +
+                          (parseAmount(editOpeningAmount) || 0)
+                      )}
+                    </span>
+                  </div>
+                  <div className="flex justify-between border-t border-gray-200 pt-1 font-bold">
+                    <span>Nueva diferencia estimada:</span>
+                    <span
+                      className={
+                        parseAmount(editClosingAmount) -
+                          (editingRegister.expectedCash -
+                            Number(editingRegister.register.opening_amount ?? 0) +
+                            (parseAmount(editOpeningAmount) || 0)) <
+                        0
+                          ? 'text-red-600'
+                          : 'text-green-600'
+                      }
+                    >
+                      {formatMoney(
+                        parseAmount(editClosingAmount) -
+                          (editingRegister.expectedCash -
+                            Number(editingRegister.register.opening_amount ?? 0) +
+                            (parseAmount(editOpeningAmount) || 0))
+                      )}
+                    </span>
+                  </div>
                 </div>
               )}
 

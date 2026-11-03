@@ -778,6 +778,7 @@ function OrderOperationRow({
   onPrint: (order: OrderWithItems) => void;
   onUpdateStatus: (order: OrderWithItems) => void;
 }) {
+  const navigate = useNavigate();
   const nextAction = nextStatusByStatus[order.status];
 
   return (
@@ -804,6 +805,16 @@ function OrderOperationRow({
           >
             Imprimir
           </button>
+          {order.status !== 'cancelled' && (
+            <button
+              type="button"
+              onClick={() => navigate(`/pedidos/${order.id}/editar`)}
+              disabled={isSaving}
+              className="rounded-md border border-blue-200 bg-blue-50 px-2 py-1.5 text-xs font-bold text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+            >
+              Editar
+            </button>
+          )}
           {order.payment_status === 'pending' && (
             <button
               type="button"

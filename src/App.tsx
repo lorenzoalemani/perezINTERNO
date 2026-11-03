@@ -24,6 +24,8 @@ export default function App() {
           >
             <Route path="/" element={<DashboardPage />} />
             <Route path="/pedidos/nuevo" element={<NewOrderPage />} />
+            <Route path="/pedidos/:orderId/editar" element={<NewOrderPage />} />
+            <Route path="/pedidos/editar/:orderId" element={<NewOrderPage />} />
             <Route path="/pendientes" element={<Navigate to="/" replace />} />
             <Route path="/pedidos" element={<Navigate to="/" replace />} />
             <Route
